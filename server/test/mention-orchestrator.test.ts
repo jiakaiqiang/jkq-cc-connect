@@ -1,6 +1,7 @@
-import test from 'node:test'
+import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type {
@@ -42,22 +43,41 @@ function createTool(agents: ToolAgentInfo[]): VibeToolInfo {
   }
 }
 
-const TEST_HOME = join(process.cwd(), '.tmp', 'mention-orchestrator-home')
-const TEST_BIN = join(TEST_HOME, 'bin')
-
-let testEnvironmentReady = false
+let gatewayTestEnvironment: {
+  cleanup: () => void
+} | null = null
 
 function ensureGatewayTestEnvironment() {
-  if (testEnvironmentReady) return
+  if (gatewayTestEnvironment) return gatewayTestEnvironment
 
-  mkdirSync(TEST_BIN, { recursive: true })
-  writeFileSync(join(TEST_BIN, 'claude.cmd'), '@echo off\r\necho 1.0.0\r\n')
+  const previousEnv = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    PATH: process.env.PATH,
+  }
+  const testHome = mkdtempSync(join(tmpdir(), 'mention-orchestrator-'))
+  const testBin = join(testHome, 'bin')
+  mkdirSync(testBin, { recursive: true })
+  writeFileSync(join(testBin, 'claude.cmd'), '@echo off\r\necho 1.0.0\r\n')
 
-  process.env.HOME = TEST_HOME
-  process.env.USERPROFILE = TEST_HOME
-  process.env.PATH = `${TEST_BIN};${process.env.PATH || ''}`
-  testEnvironmentReady = true
+  process.env.HOME = testHome
+  process.env.USERPROFILE = testHome
+  process.env.PATH = `${testBin};${previousEnv.PATH || ''}`
+
+  gatewayTestEnvironment = {
+    cleanup: () => {
+      process.env.HOME = previousEnv.HOME
+      process.env.USERPROFILE = previousEnv.USERPROFILE
+      process.env.PATH = previousEnv.PATH
+    },
+  }
+
+  return gatewayTestEnvironment
 }
+
+after(() => {
+  gatewayTestEnvironment?.cleanup()
+})
 
 async function loadRunMentionConversation() {
   const module = await import('../src/agents/orchestrator.ts')
@@ -146,6 +166,51 @@ test('WSGateway mention input persists and broadcasts the orchestration user-req
   assert.equal(broadcastAgentReply.senderAgentId, 'claude:default')
   assert.equal(broadcastAgentReply.targetAgentId, 'user')
   assert.equal(broadcastAgentReply.orchestrationStep, 'agent_to_user')
+})
+
+test('WSGateway rejects invalid mention input without interrupting a running manager', async () => {
+  const { WSGateway, createSession, getMessages } = await loadGatewayTestModules()
+  const session = createSession({ projectDir: 'D:/demo/jkq-cc-connect' })
+  const gateway = new WSGateway() as any
+  const broadcasts: ServerMsg[] = []
+
+  let stopCalls = 0
+  const manager = {
+    isRunning: () => true,
+    stop: async () => {
+      stopCalls += 1
+    },
+    start: async () => {
+      throw new Error('start should not be called for invalid mentions')
+    },
+  }
+
+  gateway.broadcast = (_sessionId: string, message: ServerMsg) => {
+    broadcasts.push(message)
+  }
+  gateway.clearStreamingMessage = () => undefined
+  gateway.getManager = () => manager
+
+  await gateway.handleInput(
+    session.id,
+    '@lead ask @peer',
+    undefined,
+    [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+      { toolId: 'codex', agentId: 'codex:peer', name: 'peer', order: 1 },
+    ],
+  )
+
+  const persistedMessages = getMessages(session.id)
+  const persistedUserMessages = persistedMessages.filter(message => message.type === 'user')
+  const broadcastUserMessages = broadcasts.filter((message) => message.type === 'user')
+  const broadcastError = broadcasts.find((message): message is Extract<ServerMsg, { type: 'error' }> => message.type === 'error')
+
+  assert.equal(stopCalls, 0)
+  assert.equal(persistedUserMessages.length, 0)
+  assert.equal(broadcastUserMessages.length, 0)
+  assert.ok(broadcastError)
+  assert.match(broadcastError.message, /same CLI tool/i)
 })
 
 test('runMentionConversation rejects mentions across different CLI tools', async () => {
