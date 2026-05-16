@@ -552,10 +552,10 @@ export class WSGateway {
     const source = this.getMentionMessageSource(message.senderAgentId)
     if (!source) return message
 
-    const sourceAgent = message.senderAgentName || undefined
+    const sourceAgent = message.senderAgentId || undefined
     const sourceAgentLabel = message.senderAgentName || undefined
     const sourceLabel = sourceAgentLabel
-      ? `${getSourceLabel(source)} / ${sourceAgentLabel}`
+      ? this.buildMentionSourceLabel(source, sourceAgentLabel, message.targetAgentName, message.targetAgentId)
       : getSourceLabel(source)
 
     return {
@@ -565,6 +565,19 @@ export class WSGateway {
       sourceAgent,
       sourceAgentLabel,
     }
+  }
+
+  private buildMentionSourceLabel(
+    source: VibeToolId,
+    senderAgentName: string,
+    targetAgentName: string | undefined,
+    targetAgentId: string | undefined,
+  ) {
+    if (targetAgentName && targetAgentId && targetAgentId !== 'user') {
+      return `${getSourceLabel(source)} / ${senderAgentName} -> ${targetAgentName}`
+    }
+
+    return `${getSourceLabel(source)} / ${senderAgentName}`
   }
 
   private getMentionMessageSource(senderAgentId: string | undefined): VibeToolId | undefined {
