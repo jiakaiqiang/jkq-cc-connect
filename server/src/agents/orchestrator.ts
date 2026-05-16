@@ -16,6 +16,7 @@ interface MentionConversationManager {
       requestedAgentName?: string | null
       requestedAgentLabel?: string | null
       preamble?: string
+      suppressAssistantMessageBroadcast?: boolean
     },
   ): Promise<ToolExecutionResult>
 }
@@ -72,6 +73,7 @@ export async function runMentionConversation(context: MentionConversationContext
         requestedAgentName: leadAgent.name,
         requestedAgentLabel: leadAgent.name,
         preamble: buildLeadAgentPreamble(context.tool, leadAgent),
+        suppressAssistantMessageBroadcast: true,
       },
     )
 
@@ -110,6 +112,7 @@ export async function runMentionConversation(context: MentionConversationContext
         requestedAgentName: collaborator.name,
         requestedAgentLabel: collaborator.name,
         preamble: buildCollaboratorPreamble(context.tool, leadAgent, collaborator, context.text),
+        suppressAssistantMessageBroadcast: true,
       },
     )
 
@@ -132,6 +135,7 @@ export async function runMentionConversation(context: MentionConversationContext
       requestedAgentName: leadAgent.name,
       requestedAgentLabel: leadAgent.name,
       preamble: buildLeadSummaryPreamble(context.tool, leadAgent, context.text, collaboratorReplies),
+      suppressAssistantMessageBroadcast: true,
     },
   )
 

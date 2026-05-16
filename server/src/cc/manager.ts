@@ -27,6 +27,7 @@ export interface ToolExecutionOptions {
   requestedAgentName?: string | null
   requestedAgentLabel?: string | null
   preamble?: string
+  suppressAssistantMessageBroadcast?: boolean
 }
 
 // Windows 下 Claude/Codex/OpenCode 的入口并不总是可直接执行的 exe，
@@ -216,14 +217,14 @@ export class CCManager {
     // 三种工具在启动命令、输出格式、会话恢复方式上差异很大，
     // 所以分成独立 startXxx，保持每条执行链路易于调试。
     if (tool === 'codex') {
-      return this.startCodex(projectDir, preparedInput)
+      return this.startCodex(projectDir, preparedInput, options)
     }
 
     if (tool === 'opencode') {
-      return this.startOpenCode(projectDir, preparedInput)
+      return this.startOpenCode(projectDir, preparedInput, options)
     }
 
-    return this.startClaude(projectDir, preparedInput)
+    return this.startClaude(projectDir, preparedInput, options)
   }
 
   async startCommand(projectDir: string, tool: VibeToolId, args: string[]): Promise<boolean> {
@@ -300,7 +301,11 @@ export class CCManager {
     }
   }
 
-  private async startClaude(projectDir: string, inputText: string): Promise<ToolExecutionResult> {
+  private async startClaude(
+    projectDir: string,
+    inputText: string,
+    options: ToolExecutionOptions,
+  ): Promise<ToolExecutionResult> {
     try {
       const args = [
         '--print',
@@ -377,7 +382,7 @@ export class CCManager {
             if (msg.type === 'text' || msg.type === 'code' || msg.type === 'diff') {
               assistantText += msg.content
             }
-            this.broadcast?.(msg)
+            this.broadcastExecutionMessage(msg, options)
           })
         })
 
@@ -431,7 +436,11 @@ export class CCManager {
     }
   }
 
-  private async startCodex(projectDir: string, inputText: string): Promise<ToolExecutionResult> {
+  private async startCodex(
+    projectDir: string,
+    inputText: string,
+    options: ToolExecutionOptions,
+  ): Promise<ToolExecutionResult> {
     try {
       const args = this.codexSessionId
         ? [
@@ -517,7 +526,7 @@ export class CCManager {
             const line = this.pendingBuffer.slice(0, newlineIndex).trim()
             this.pendingBuffer = this.pendingBuffer.slice(newlineIndex + 1)
             if (line) {
-              const outcome = this.handleCodexEvent(line)
+              const outcome = this.handleCodexEvent(line, options)
               hasAssistantMessage = hasAssistantMessage || outcome.producedAssistantOutput
               if (outcome.producedAssistantOutput) {
                 clearResponseTimeout()
@@ -544,7 +553,7 @@ export class CCManager {
 
           const tail = this.pendingBuffer.trim()
           if (tail) {
-            const outcome = this.handleCodexEvent(tail)
+            const outcome = this.handleCodexEvent(tail, options)
             hasAssistantMessage = hasAssistantMessage || outcome.producedAssistantOutput
             if (outcome.outputText) assistantText += outcome.outputText
             eventErrorMessage ||= outcome.errorMessage || null
@@ -575,7 +584,11 @@ export class CCManager {
     }
   }
 
-  private async startOpenCode(projectDir: string, inputText: string): Promise<ToolExecutionResult> {
+  private async startOpenCode(
+    projectDir: string,
+    inputText: string,
+    options: ToolExecutionOptions,
+  ): Promise<ToolExecutionResult> {
     try {
       const args = [
         'run',
@@ -659,7 +672,7 @@ export class CCManager {
             const line = this.pendingBuffer.slice(0, newlineIndex).trim()
             this.pendingBuffer = this.pendingBuffer.slice(newlineIndex + 1)
             if (line) {
-              const outcome = this.handleOpenCodeEvent(line, () => {
+              const outcome = this.handleOpenCodeEvent(line, options, () => {
                 openCodeMessageId ||= crypto.randomUUID()
                 return openCodeMessageId
               })
@@ -689,7 +702,7 @@ export class CCManager {
 
           const tail = this.pendingBuffer.trim()
           if (tail) {
-            const outcome = this.handleOpenCodeEvent(tail, () => {
+            const outcome = this.handleOpenCodeEvent(tail, options, () => {
               openCodeMessageId ||= crypto.randomUUID()
               return openCodeMessageId
             })
@@ -810,7 +823,12 @@ export class CCManager {
     }
   }
 
-  private handleCodexEvent(line: string): ToolEventOutcome {
+  private broadcastExecutionMessage(msg: ServerMsg, options: ToolExecutionOptions) {
+    if (options.suppressAssistantMessageBroadcast && this.isAssistantLikeMessage(msg)) return
+    this.broadcast?.(msg)
+  }
+
+  private handleCodexEvent(line: string, options: ToolExecutionOptions): ToolEventOutcome {
     try {
       const event = JSON.parse(line)
 
@@ -821,11 +839,11 @@ export class CCManager {
       }
 
       if (event.type === 'item.completed' && event.item?.type === 'agent_message' && typeof event.item.text === 'string') {
-        this.broadcast?.({
+        this.broadcastExecutionMessage({
           type: 'text',
           content: event.item.text,
           messageId: crypto.randomUUID(),
-        })
+        }, options)
         return { producedAssistantOutput: true, outputText: event.item.text }
       }
 
@@ -857,7 +875,7 @@ export class CCManager {
     return { producedAssistantOutput: false }
   }
 
-  private handleOpenCodeEvent(line: string, getMessageId: () => string): ToolEventOutcome {
+  private handleOpenCodeEvent(line: string, options: ToolExecutionOptions, getMessageId: () => string): ToolEventOutcome {
     try {
       const event = JSON.parse(line)
 
@@ -866,11 +884,11 @@ export class CCManager {
       }
 
       if (event.type === 'text' && typeof event.part?.text === 'string') {
-        this.broadcast?.({
+        this.broadcastExecutionMessage({
           type: 'text',
           content: event.part.text,
           messageId: getMessageId(),
-        })
+        }, options)
         return { producedAssistantOutput: true, outputText: event.part.text }
       }
 

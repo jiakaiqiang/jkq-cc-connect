@@ -453,6 +453,48 @@ test('runMentionConversation fails when a single mentioned agent returns blank a
   assert.equal(published.length, 0)
 })
 
+test('runMentionConversation requests suppressed runtime assistant broadcasts for single-agent mention runs', async () => {
+  const startCalls: Array<{ requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean }> = []
+  const manager = {
+    isRunning: () => false,
+    start: async (
+      _projectDir: string,
+      _text: string,
+      _toolId: string,
+      options?: { requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean },
+    ) => {
+      startCalls.push({
+        requestedAgentName: options?.requestedAgentName,
+        suppressAssistantMessageBroadcast: options?.suppressAssistantMessageBroadcast,
+      })
+      return { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'lead summary' }
+    },
+  }
+
+  const runMentionConversation = await loadRunMentionConversation()
+  const result = await runMentionConversation({
+    sessionId: 's1',
+    projectDir: 'D:/demo/jkq-cc-connect',
+    text: '@lead answer this',
+    mentions: [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+    ],
+    tool: createTool([createAgent('lead')]),
+    manager: manager as never,
+    savePublicMessage: () => undefined,
+    publish: () => undefined,
+    onUserMessage: () => undefined,
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(startCalls, [
+    {
+      requestedAgentName: 'lead',
+      suppressAssistantMessageBroadcast: true,
+    },
+  ])
+})
+
 test('runMentionConversation emits structured metadata for agent-to-agent and agent-to-user messages', async () => {
   const saved: Array<ServerMsg & Partial<OrchestrationMetadata>> = []
   const published: Array<ServerMsg & Partial<OrchestrationMetadata>> = []
@@ -587,6 +629,61 @@ test('runMentionConversation normalizes mention order before resolving lead and 
   assert.match(startCalls[0].preamble || '', /lead/i)
 })
 
+test('runMentionConversation requests suppressed runtime assistant broadcasts for collaborator and lead mention runs', async () => {
+  const startCalls: Array<{ requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean }> = []
+  const leadAgent = createAgent('lead')
+  const peerAgent = createAgent('peer')
+
+  let call = 0
+  const manager = {
+    isRunning: () => false,
+    start: async (
+      _projectDir: string,
+      _text: string,
+      _toolId: string,
+      options?: { requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean },
+    ) => {
+      call += 1
+      startCalls.push({
+        requestedAgentName: options?.requestedAgentName,
+        suppressAssistantMessageBroadcast: options?.suppressAssistantMessageBroadcast,
+      })
+
+      return call === 1
+        ? { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'peer reply' }
+        : { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'lead summary' }
+    },
+  }
+
+  const runMentionConversation = await loadRunMentionConversation()
+  const result = await runMentionConversation({
+    sessionId: 's1',
+    projectDir: 'D:/demo/jkq-cc-connect',
+    text: '@lead check @peer',
+    mentions: [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+      { toolId: 'claude', agentId: 'claude:peer', name: 'peer', order: 1 },
+    ],
+    tool: createTool([leadAgent, peerAgent]),
+    manager: manager as never,
+    savePublicMessage: () => undefined,
+    publish: () => undefined,
+    onUserMessage: () => undefined,
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(startCalls, [
+    {
+      requestedAgentName: 'peer',
+      suppressAssistantMessageBroadcast: true,
+    },
+    {
+      requestedAgentName: 'lead',
+      suppressAssistantMessageBroadcast: true,
+    },
+  ])
+})
+
 test('runMentionConversation falls back to a visible collaborator reply and still completes the lead summary', async () => {
   const saved: ServerMsg[] = []
   const published: ServerMsg[] = []
@@ -648,4 +745,78 @@ test('runMentionConversation falls back to a visible collaborator reply and stil
   assert.match(savedCollaboratorReply.content, /did not provide a usable reply/i)
   assert.ok(publishedCollaboratorReply)
   assert.match(publishedCollaboratorReply.content, /did not provide a usable reply/i)
+})
+
+test('WSGateway mention orchestration does not persist or rebroadcast simulated raw runtime assistant text', async () => {
+  const { WSGateway, createSession, getMessages } = await loadGatewayTestModules()
+  const session = createSession({ projectDir: 'D:/demo/jkq-cc-connect' })
+  const gateway = new WSGateway() as any
+  const broadcasts: ServerMsg[] = []
+  const startCalls: Array<{ requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean }> = []
+
+  let call = 0
+  const manager = {
+    isRunning: () => false,
+    start: async (
+      _projectDir: string,
+      _text: string,
+      _toolId: string,
+      options?: { requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean },
+    ) => {
+      call += 1
+      startCalls.push({
+        requestedAgentName: options?.requestedAgentName,
+        suppressAssistantMessageBroadcast: options?.suppressAssistantMessageBroadcast,
+      })
+
+      if (!options?.suppressAssistantMessageBroadcast) {
+        gateway.broadcast(session.id, {
+          type: 'text',
+          content: `raw runtime assistant text ${call}`,
+          messageId: `raw-${call}`,
+        })
+      }
+
+      return call === 1
+        ? { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'peer reply' }
+        : { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'lead summary' }
+    },
+  }
+
+  gateway.broadcast = (_sessionId: string, message: ServerMsg) => {
+    broadcasts.push(message)
+  }
+  gateway.clearStreamingMessage = () => undefined
+  gateway.getManager = () => manager
+
+  await gateway.handleInput(
+    session.id,
+    '@lead check @peer',
+    undefined,
+    [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+      { toolId: 'claude', agentId: 'claude:peer', name: 'peer', order: 1 },
+    ],
+  )
+
+  assert.deepEqual(startCalls, [
+    {
+      requestedAgentName: 'peer',
+      suppressAssistantMessageBroadcast: true,
+    },
+    {
+      requestedAgentName: 'lead',
+      suppressAssistantMessageBroadcast: true,
+    },
+  ])
+
+  const runtimeBroadcasts = broadcasts.filter((message) =>
+    message.type === 'text' && message.content.includes('raw runtime assistant text')
+  )
+  const runtimePersisted = getMessages(session.id).filter((message) =>
+    message.type === 'text' && message.content.includes('raw runtime assistant text')
+  )
+
+  assert.equal(runtimeBroadcasts.length, 0)
+  assert.equal(runtimePersisted.length, 0)
 })
