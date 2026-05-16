@@ -4,6 +4,36 @@ import assert from 'node:assert/strict'
 import { CCManager } from '../src/cc/manager.ts'
 import type { ServerMsg } from '../src/types/index.ts'
 
+test('CCManager helper suppresses Claude assistant text broadcasts', () => {
+  const manager = new CCManager() as any
+  const broadcasts: ServerMsg[] = []
+  manager.setBroadcast((msg: ServerMsg) => broadcasts.push(msg))
+
+  manager.broadcastExecutionMessage({
+    type: 'text',
+    content: 'suppressed claude reply',
+    messageId: 'claude-1',
+  }, {
+    suppressAssistantMessageBroadcast: true,
+  })
+
+  assert.deepEqual(broadcasts, [])
+
+  manager.broadcastExecutionMessage({
+    type: 'text',
+    content: 'visible claude reply',
+    messageId: 'claude-2',
+  }, {})
+
+  assert.deepEqual(broadcasts, [
+    {
+      type: 'text',
+      content: 'visible claude reply',
+      messageId: 'claude-2',
+    },
+  ])
+})
+
 test('CCManager suppresses Codex assistant text broadcasts while preserving captured output', () => {
   const manager = new CCManager() as any
   const broadcasts: ServerMsg[] = []

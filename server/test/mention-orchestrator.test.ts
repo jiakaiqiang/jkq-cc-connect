@@ -916,41 +916,52 @@ test('WSGateway mention orchestration does not persist or rebroadcast simulated 
   const gateway = new WSGateway() as any
   const broadcasts: ServerMsg[] = []
   const startCalls: Array<{ requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean }> = []
-
-  let call = 0
-  const manager = {
-    isRunning: () => false,
-    start: async (
-      _projectDir: string,
-      _text: string,
-      _toolId: string,
-      options?: { requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean },
-    ) => {
-      call += 1
-      startCalls.push({
-        requestedAgentName: options?.requestedAgentName,
-        suppressAssistantMessageBroadcast: options?.suppressAssistantMessageBroadcast,
-      })
-
-      if (!options?.suppressAssistantMessageBroadcast) {
-        gateway.broadcast(session.id, {
-          type: 'text',
-          content: `raw runtime assistant text ${call}`,
-          messageId: `raw-${call}`,
-        })
-      }
-
-      return call === 1
-        ? { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'peer reply' }
-        : { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'lead summary' }
-    },
-  }
-
   gateway.broadcast = (_sessionId: string, message: ServerMsg) => {
     broadcasts.push(message)
   }
   gateway.clearStreamingMessage = () => undefined
-  gateway.getManager = () => manager
+
+  const manager = gateway.getManager(session.id) as any
+  manager.stop = async () => undefined
+  manager.isRunning = () => false
+
+  let call = 0
+  manager.start = async (
+    _projectDir: string,
+    _text: string,
+    _toolId: string,
+    options?: { requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean },
+  ) => {
+    call += 1
+    startCalls.push({
+      requestedAgentName: options?.requestedAgentName,
+      suppressAssistantMessageBroadcast: options?.suppressAssistantMessageBroadcast,
+    })
+
+    manager.broadcastExecutionMessage({
+      type: 'text',
+      content: `raw runtime assistant text ${call}`,
+      messageId: `raw-${call}`,
+    }, {
+      suppressAssistantMessageBroadcast: options?.suppressAssistantMessageBroadcast,
+    })
+
+    return call === 1
+      ? { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'peer reply' }
+      : { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'lead summary' }
+  }
+
+  await manager.start(session.projectDir, 'unsuppressed probe', 'claude', {
+    requestedAgentName: 'peer',
+    suppressAssistantMessageBroadcast: false,
+  })
+
+  const baselineRuntimeBroadcasts = broadcasts.filter((message) =>
+    message.type === 'text' && message.content.includes('raw runtime assistant text')
+  ).length
+  const baselineRuntimePersisted = getMessages(session.id).filter((message) =>
+    message.type === 'text' && message.content.includes('raw runtime assistant text')
+  ).length
 
   await gateway.handleInput(
     session.id,
@@ -962,7 +973,7 @@ test('WSGateway mention orchestration does not persist or rebroadcast simulated 
     ],
   )
 
-  assert.deepEqual(startCalls, [
+  assert.deepEqual(startCalls.slice(1), [
     {
       requestedAgentName: 'peer',
       suppressAssistantMessageBroadcast: true,
@@ -980,6 +991,12 @@ test('WSGateway mention orchestration does not persist or rebroadcast simulated 
     message.type === 'text' && message.content.includes('raw runtime assistant text')
   )
 
-  assert.equal(runtimeBroadcasts.length, 0)
-  assert.equal(runtimePersisted.length, 0)
+  assert.equal(runtimeBroadcasts.length, baselineRuntimeBroadcasts)
+  assert.equal(runtimePersisted.length, baselineRuntimePersisted)
+  assert.ok(
+    broadcasts.some((message) => message.type === 'text' && message.content === 'raw runtime assistant text 1'),
+  )
+  assert.ok(
+    getMessages(session.id).some((message) => message.type === 'text' && message.content === 'raw runtime assistant text 1'),
+  )
 })
