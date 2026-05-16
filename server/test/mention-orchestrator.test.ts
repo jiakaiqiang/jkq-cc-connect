@@ -143,3 +143,57 @@ test('runMentionConversation emits structured metadata for agent-to-agent and ag
     },
   ])
 })
+
+test('runMentionConversation falls back to a visible collaborator reply and still completes the lead summary', async () => {
+  const published: ServerMsg[] = []
+  const leadAgent = createAgent('lead')
+  const peerAgent = createAgent('peer')
+  const startCalls: Array<{ requestedAgentName?: string | null; preamble?: string }> = []
+
+  let call = 0
+  const manager = {
+    isRunning: () => false,
+    start: async (_projectDir: string, _text: string, _toolId: string, options?: { requestedAgentName?: string | null; preamble?: string }) => {
+      call += 1
+      startCalls.push({
+        requestedAgentName: options?.requestedAgentName,
+        preamble: options?.preamble,
+      })
+
+      return call === 1
+        ? { ok: false, tool: 'claude', producedOutput: false, recoverable: true, errorMessage: 'peer failed' }
+        : { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'lead summary' }
+    },
+  }
+
+  const runMentionConversation = await loadRunMentionConversation()
+  const result = await runMentionConversation({
+    sessionId: 's1',
+    projectDir: 'D:/demo/jkq-cc-connect',
+    text: '@lead check @peer',
+    mentions: [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+      { toolId: 'claude', agentId: 'claude:peer', name: 'peer', order: 1 },
+    ],
+    tool: createTool([leadAgent, peerAgent]),
+    manager: manager as never,
+    savePublicMessage: (message) => published.push(message),
+    publish: (message) => published.push(message),
+    onUserMessage: () => undefined,
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(startCalls.length, 2)
+  assert.deepEqual(startCalls.map(call => call.requestedAgentName), ['peer', 'lead'])
+  assert.match(startCalls[1].preamble || '', /peer/i)
+  assert.match(startCalls[1].preamble || '', /did not provide a usable reply/i)
+
+  const collaboratorReply = published.find((message) =>
+    message.type === 'text'
+    && message.orchestrationStep === 'agent_reply'
+    && message.senderAgentId === peerAgent.id
+  )
+
+  assert.ok(collaboratorReply)
+  assert.match(collaboratorReply.content, /did not provide a usable reply/i)
+})
