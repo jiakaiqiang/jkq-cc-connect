@@ -77,10 +77,9 @@ export async function runMentionConversation(context: MentionConversationContext
       },
     )
 
-    if (!leadResult.ok) return leadResult
-
     const summary = getUsableAssistantText(leadResult)
     if (!summary) {
+      if (!leadResult.ok) return leadResult
       return createFailureResult(context.tool.id, `${leadAgent.name} did not provide a usable reply.`)
     }
 
@@ -139,10 +138,9 @@ export async function runMentionConversation(context: MentionConversationContext
     },
   )
 
-  if (!leadResult.ok) return leadResult
-
   const summary = getUsableAssistantText(leadResult)
   if (!summary) {
+    if (!leadResult.ok) return leadResult
     return createFailureResult(context.tool.id, `${leadAgent.name} did not provide a usable reply.`)
   }
 
@@ -301,7 +299,6 @@ function buildCollaboratorFallbackReply(collaborator: ToolAgentInfo) {
 }
 
 function getUsableAssistantText(result: Pick<ToolExecutionResult, 'ok' | 'assistantText'>) {
-  if (!result.ok) return ''
   return result.assistantText?.trim() || ''
 }
 

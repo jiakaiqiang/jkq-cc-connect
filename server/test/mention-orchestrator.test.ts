@@ -453,6 +453,48 @@ test('runMentionConversation fails when a single mentioned agent returns blank a
   assert.equal(published.length, 0)
 })
 
+test('runMentionConversation surfaces usable assistant text from a failed single-agent lead run', async () => {
+  const saved: ServerMsg[] = []
+  const published: ServerMsg[] = []
+  const manager = {
+    isRunning: () => false,
+    start: async () => ({
+      ok: false,
+      tool: 'claude',
+      producedOutput: true,
+      recoverable: true,
+      errorMessage: 'lead failed after producing text',
+      assistantText: '  lead fallback reply  ',
+    }),
+  }
+
+  const runMentionConversation = await loadRunMentionConversation()
+  const result = await runMentionConversation({
+    sessionId: 's1',
+    projectDir: 'D:/demo/jkq-cc-connect',
+    text: '@lead answer this',
+    mentions: [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+    ],
+    tool: createTool([createAgent('lead')]),
+    manager: manager as never,
+    savePublicMessage: (message) => saved.push(message),
+    publish: (message) => published.push(message),
+    onUserMessage: () => undefined,
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.assistantText, 'lead fallback reply')
+  assert.equal(saved.length, 1)
+  assert.equal(published.length, 1)
+  assert.equal(saved[0]?.type, 'text')
+  assert.equal(saved[0]?.content, 'lead fallback reply')
+  assert.equal(saved[0]?.orchestrationStep, 'agent_to_user')
+  assert.equal(published[0]?.type, 'text')
+  assert.equal(published[0]?.content, 'lead fallback reply')
+  assert.equal(published[0]?.orchestrationStep, 'agent_to_user')
+})
+
 test('runMentionConversation requests suppressed runtime assistant broadcasts for single-agent mention runs', async () => {
   const startCalls: Array<{ requestedAgentName?: string | null; suppressAssistantMessageBroadcast?: boolean }> = []
   const manager = {
@@ -745,6 +787,127 @@ test('runMentionConversation falls back to a visible collaborator reply and stil
   assert.match(savedCollaboratorReply.content, /did not provide a usable reply/i)
   assert.ok(publishedCollaboratorReply)
   assert.match(publishedCollaboratorReply.content, /did not provide a usable reply/i)
+})
+
+test('runMentionConversation surfaces collaborator assistant text even when the collaborator run is non-ok', async () => {
+  const saved: ServerMsg[] = []
+  const leadAgent = createAgent('lead')
+  const peerAgent = createAgent('peer')
+  const startCalls: Array<{ requestedAgentName?: string | null; preamble?: string }> = []
+
+  let call = 0
+  const manager = {
+    isRunning: () => false,
+    start: async (_projectDir: string, _text: string, _toolId: string, options?: { requestedAgentName?: string | null; preamble?: string }) => {
+      call += 1
+      startCalls.push({
+        requestedAgentName: options?.requestedAgentName,
+        preamble: options?.preamble,
+      })
+
+      return call === 1
+        ? {
+            ok: false,
+            tool: 'claude',
+            producedOutput: true,
+            recoverable: true,
+            errorMessage: 'peer failed after producing text',
+            assistantText: '  peer reply despite failure  ',
+          }
+        : { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'lead summary' }
+    },
+  }
+
+  const runMentionConversation = await loadRunMentionConversation()
+  const result = await runMentionConversation({
+    sessionId: 's1',
+    projectDir: 'D:/demo/jkq-cc-connect',
+    text: '@lead check @peer',
+    mentions: [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+      { toolId: 'claude', agentId: 'claude:peer', name: 'peer', order: 1 },
+    ],
+    tool: createTool([leadAgent, peerAgent]),
+    manager: manager as never,
+    savePublicMessage: (message) => saved.push(message),
+    publish: () => undefined,
+    onUserMessage: () => undefined,
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(startCalls.length, 2)
+  assert.equal(startCalls[1]?.requestedAgentName, 'lead')
+  assert.match(startCalls[1]?.preamble || '', /peer reply despite failure/i)
+  assert.doesNotMatch(startCalls[1]?.preamble || '', /did not provide a usable reply/i)
+
+  const collaboratorReply = saved.find((message) =>
+    message.type === 'text'
+    && message.orchestrationStep === 'agent_reply'
+    && message.senderAgentId === peerAgent.id
+  )
+
+  assert.ok(collaboratorReply)
+  assert.equal(collaboratorReply.content, 'peer reply despite failure')
+})
+
+test('runMentionConversation surfaces usable assistant text from a failed final lead run', async () => {
+  const saved: ServerMsg[] = []
+  const published: ServerMsg[] = []
+  const leadAgent = createAgent('lead')
+  const peerAgent = createAgent('peer')
+
+  let call = 0
+  const manager = {
+    isRunning: () => false,
+    start: async () => {
+      call += 1
+      return call === 1
+        ? { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'peer reply' }
+        : {
+            ok: false,
+            tool: 'claude',
+            producedOutput: true,
+            recoverable: true,
+            errorMessage: 'lead failed after producing text',
+            assistantText: '  lead summary despite failure  ',
+          }
+    },
+  }
+
+  const runMentionConversation = await loadRunMentionConversation()
+  const result = await runMentionConversation({
+    sessionId: 's1',
+    projectDir: 'D:/demo/jkq-cc-connect',
+    text: '@lead check @peer',
+    mentions: [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+      { toolId: 'claude', agentId: 'claude:peer', name: 'peer', order: 1 },
+    ],
+    tool: createTool([leadAgent, peerAgent]),
+    manager: manager as never,
+    savePublicMessage: (message) => saved.push(message),
+    publish: (message) => published.push(message),
+    onUserMessage: () => undefined,
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.assistantText, 'lead summary despite failure')
+
+  const finalSaved = saved.find((message) =>
+    message.type === 'text'
+    && message.orchestrationStep === 'agent_to_user'
+    && message.senderAgentId === leadAgent.id
+  )
+  const finalPublished = published.find((message) =>
+    message.type === 'text'
+    && message.orchestrationStep === 'agent_to_user'
+    && message.senderAgentId === leadAgent.id
+  )
+
+  assert.ok(finalSaved)
+  assert.equal(finalSaved.content, 'lead summary despite failure')
+  assert.ok(finalPublished)
+  assert.equal(finalPublished.content, 'lead summary despite failure')
 })
 
 test('WSGateway mention orchestration does not persist or rebroadcast simulated raw runtime assistant text', async () => {
