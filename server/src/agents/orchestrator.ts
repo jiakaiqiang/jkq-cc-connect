@@ -33,6 +33,7 @@ interface MentionConversationContext {
 }
 
 interface ResolvedMentions {
+  tool: VibeToolInfo
   leadAgent: ToolAgentInfo
   collaboratorAgents: ToolAgentInfo[]
 }
@@ -45,7 +46,11 @@ interface CollaboratorReply {
 const MAX_MENTIONED_AGENTS = 3
 
 export async function runMentionConversation(context: MentionConversationContext): Promise<ToolExecutionResult> {
-  const validation = validateMentions(context.tool, context.mentions)
+  const validation = validateMentionConversationRequest({
+    mentions: context.mentions,
+    tools: [context.tool],
+    expectedToolId: context.tool.id,
+  })
   if (!validation.ok) {
     return createFailureResult(context.tool.id, validation.errorMessage)
   }
@@ -147,7 +152,17 @@ export async function runMentionConversation(context: MentionConversationContext
   return { ...leadResult, assistantText: summary }
 }
 
-function validateMentions(tool: VibeToolInfo, mentions: AgentMention[]): ({ ok: true } & ResolvedMentions) | { ok: false; errorMessage: string } {
+export function validateMentionConversationRequest({
+  mentions,
+  tools,
+  expectedToolId,
+  requireExecutable = false,
+}: {
+  mentions: AgentMention[]
+  tools: VibeToolInfo[]
+  expectedToolId?: VibeToolInfo['id']
+  requireExecutable?: boolean
+}): ({ ok: true } & ResolvedMentions) | { ok: false; errorMessage: string } {
   const normalizedMentions = [...mentions].sort((left, right) => left.order - right.order)
 
   if (!normalizedMentions.length) {
@@ -163,8 +178,17 @@ function validateMentions(tool: VibeToolInfo, mentions: AgentMention[]): ({ ok: 
     return { ok: false, errorMessage: 'All mentioned agents must belong to the same CLI tool.' }
   }
 
-  if (tool.id !== toolId) {
+  if (expectedToolId && expectedToolId !== toolId) {
     return { ok: false, errorMessage: 'The selected CLI tool does not match the mentioned agents.' }
+  }
+
+  const tool = tools.find((candidate) => candidate.id === toolId)
+  if (!tool) {
+    return { ok: false, errorMessage: 'The selected CLI tool is not currently available.' }
+  }
+
+  if (requireExecutable && !tool.supportsExecution) {
+    return { ok: false, errorMessage: tool.detail || 'The selected CLI tool is not currently available.' }
   }
 
   const leadAgent = resolveAgent(tool, normalizedMentions[0])
@@ -179,6 +203,7 @@ function validateMentions(tool: VibeToolInfo, mentions: AgentMention[]): ({ ok: 
 
   return {
     ok: true,
+    tool,
     leadAgent,
     collaboratorAgents: collaboratorAgents as ToolAgentInfo[],
   }

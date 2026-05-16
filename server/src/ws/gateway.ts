@@ -16,12 +16,12 @@ import { refreshConversationStateFromRecentHistory } from '../store/conversation
 import { appendMessageContent, getRecentMessagesWindow, saveMessage } from '../store/messages.js'
 import { CCManager } from '../cc/manager.js'
 import { buildExecutionInput } from '../cc/context.js'
-import { runMentionConversation } from '../agents/orchestrator.js'
+import { runMentionConversation, validateMentionConversationRequest } from '../agents/orchestrator.js'
 import { parseClientMessage, serializeServerMsg } from './protocol.js'
 import { logger } from '../utils/logger.js'
 import { getFallbackTools, getVibeTools, planToolRoute } from '../tools/vibe.js'
 import { getSlashHelpText, parseSlashCommand } from '../commands/slash.js'
-import type { AgentMention, MessageSource, ServerMsg, MessageType, ToolAgentInfo, ToolExecutionMode, ToolFailureKind, VibeToolId, VibeToolInfo } from '../types/index.js'
+import type { AgentMention, MessageSource, ServerMsg, MessageType, ToolExecutionMode, ToolFailureKind, VibeToolId } from '../types/index.js'
 
 interface ClientState {
   ws: WebSocket
@@ -220,7 +220,11 @@ export class WSGateway {
       .sort((left, right) => left.order - right.order)
       .filter((mention, index, array) => array.findIndex(item => item.agentId === mention.agentId) === index)
     if (orderedMentions.length) {
-      const mentionValidation = this.prevalidateMentionRequest(orderedMentions, getVibeTools())
+      const mentionValidation = validateMentionConversationRequest({
+        mentions: orderedMentions,
+        tools: getVibeTools(),
+        requireExecutable: true,
+      })
       if (!mentionValidation.ok) {
         this.broadcast(session.id, {
           type: 'error',
@@ -310,45 +314,6 @@ export class WSGateway {
 
     const tools = getVibeTools()
     await this.executeWithFallback(session.id, session.projectDir, text, routePlan.selectedTools[0], tools)
-  }
-
-  private prevalidateMentionRequest(
-    mentions: AgentMention[],
-    tools: VibeToolInfo[],
-  ): { ok: true; tool: VibeToolInfo } | { ok: false; errorMessage: string } {
-    if (!mentions.length) {
-      return { ok: false, errorMessage: 'At least one mentioned agent is required.' }
-    }
-
-    if (mentions.length > 3) {
-      return { ok: false, errorMessage: 'At most 3 agents can participate in a single mention conversation.' }
-    }
-
-    const toolId = mentions[0].toolId
-    if (mentions.some((mention) => mention.toolId !== toolId)) {
-      return { ok: false, errorMessage: 'All mentioned agents must belong to the same CLI tool.' }
-    }
-
-    const tool = tools.find(item => item.id === toolId)
-    if (!tool?.supportsExecution) {
-      return { ok: false, errorMessage: tool?.detail || 'The selected CLI tool is not currently available.' }
-    }
-
-    const unresolvedMention = mentions.find((mention) => !this.resolveMentionAgent(tool, mention))
-    if (unresolvedMention) {
-      return {
-        ok: false,
-        errorMessage: mentions[0] === unresolvedMention
-          ? `Unable to resolve agent ${unresolvedMention.name}.`
-          : 'One or more mentioned agents could not be resolved for the current CLI.',
-      }
-    }
-
-    return { ok: true, tool }
-  }
-
-  private resolveMentionAgent(tool: VibeToolInfo, mention: AgentMention): ToolAgentInfo | null {
-    return tool.agents.find((agent) => agent.id === mention.agentId || agent.name === mention.name) || null
   }
 
   private async executeWithFallback(

@@ -57,8 +57,12 @@ function ensureGatewayTestEnvironment() {
   }
   const testHome = mkdtempSync(join(tmpdir(), 'mention-orchestrator-'))
   const testBin = join(testHome, 'bin')
+  const agentsDir = join(testHome, '.claude', 'agents')
   mkdirSync(testBin, { recursive: true })
+  mkdirSync(agentsDir, { recursive: true })
   writeFileSync(join(testBin, 'claude.cmd'), '@echo off\r\necho 1.0.0\r\n')
+  writeFileSync(join(agentsDir, 'lead.md'), '---\nname: lead\ndescription: Lead agent\n---\n## Responsibilities\n- Lead orchestration\n')
+  writeFileSync(join(agentsDir, 'peer.md'), '---\nname: peer\ndescription: Peer agent\n---\n## Responsibilities\n- Peer collaboration\n')
 
   process.env.HOME = testHome
   process.env.USERPROFILE = testHome
@@ -82,6 +86,11 @@ after(() => {
 async function loadRunMentionConversation() {
   const module = await import('../src/agents/orchestrator.ts')
   return module.runMentionConversation
+}
+
+async function loadMentionValidation() {
+  const module = await import('../src/agents/orchestrator.ts')
+  return module.validateMentionConversationRequest
 }
 
 async function loadGatewayTestModules() {
@@ -181,6 +190,143 @@ test('WSGateway mention input persists and broadcasts the orchestration user-req
   assert.ok(broadcastUserMessageIndex >= 0)
   assert.ok(broadcastAgentReplyIndex >= 0)
   assert.ok(broadcastUserMessageIndex < broadcastAgentReplyIndex)
+})
+
+test('validateMentionConversationRequest resolves lead and collaborators for shared gateway/orchestrator mention validation', async () => {
+  const validateMentionConversationRequest = await loadMentionValidation()
+  const leadAgent = createAgent('lead')
+  const peerAgent = createAgent('peer')
+
+  const result = validateMentionConversationRequest({
+    mentions: [
+      { toolId: 'claude', agentId: 'claude:peer', name: 'peer', order: 2 },
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 1 },
+    ],
+    tools: [createTool([leadAgent, peerAgent])],
+    expectedToolId: 'claude',
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.tool.id, 'claude')
+  assert.equal(result.leadAgent.id, leadAgent.id)
+  assert.deepEqual(result.collaboratorAgents.map((agent) => agent.id), [peerAgent.id])
+})
+
+test('WSGateway mention input persists and broadcasts the multi-agent orchestration lifecycle', async () => {
+  const { WSGateway, createSession, getMessages } = await loadGatewayTestModules()
+  const session = createSession({ projectDir: 'D:/demo/jkq-cc-connect' })
+  const gateway = new WSGateway() as any
+  const broadcasts: ServerMsg[] = []
+  const startCalls: string[] = []
+
+  const manager = {
+    isRunning: () => false,
+    start: async (_projectDir: string, _text: string, _tool: string, options?: { requestedAgentName?: string | null }) => {
+      startCalls.push(options?.requestedAgentName || '')
+      return startCalls.length === 1
+        ? {
+            ok: true,
+            tool: 'claude',
+            producedOutput: true,
+            recoverable: false,
+            assistantText: 'peer reply',
+          }
+        : {
+            ok: true,
+            tool: 'claude',
+            producedOutput: true,
+            recoverable: false,
+            assistantText: 'lead summary',
+          }
+    },
+  }
+
+  gateway.broadcast = (_sessionId: string, message: ServerMsg) => {
+    broadcasts.push(message)
+  }
+  gateway.clearStreamingMessage = () => undefined
+  gateway.getManager = () => manager
+
+  await gateway.handleInput(
+    session.id,
+    '@lead check @peer',
+    undefined,
+    [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+      { toolId: 'claude', agentId: 'claude:peer', name: 'peer', order: 1 },
+    ],
+  )
+
+  const persistedEntries = getMessages(session.id)
+    .filter((message) => message.type === 'user' || (message.type === 'text' && message.metadata.orchestrationStep))
+    .map((message) => ({
+      type: message.type,
+      content: message.content,
+      senderType: message.metadata.senderType,
+      senderAgentId: message.metadata.senderAgentId,
+      senderAgentName: message.metadata.senderAgentName,
+      targetAgentId: message.metadata.targetAgentId,
+      targetAgentName: message.metadata.targetAgentName,
+      orchestrationStep: message.metadata.orchestrationStep,
+    }))
+
+  const broadcastEntries = broadcasts
+    .filter((message) => message.type === 'user' || (message.type === 'text' && message.orchestrationStep))
+    .map((message) => ({
+      type: message.type,
+      content: message.content,
+      senderType: message.senderType,
+      senderAgentId: message.senderAgentId,
+      senderAgentName: message.senderAgentName,
+      targetAgentId: message.targetAgentId,
+      targetAgentName: message.targetAgentName,
+      orchestrationStep: message.orchestrationStep,
+    }))
+
+  assert.deepEqual(startCalls, ['peer', 'lead'])
+  assert.deepEqual(persistedEntries, [
+    {
+      type: 'user',
+      content: '@lead check @peer',
+      senderType: 'user',
+      senderAgentId: undefined,
+      senderAgentName: undefined,
+      targetAgentId: undefined,
+      targetAgentName: undefined,
+      orchestrationStep: 'user_request',
+    },
+    {
+      type: 'text',
+      content: '@peer please share the most relevant context for: @lead check @peer',
+      senderType: 'agent',
+      senderAgentId: 'claude:lead',
+      senderAgentName: 'lead',
+      targetAgentId: 'claude:peer',
+      targetAgentName: 'peer',
+      orchestrationStep: 'agent_to_agent',
+    },
+    {
+      type: 'text',
+      content: 'peer reply',
+      senderType: 'agent',
+      senderAgentId: 'claude:peer',
+      senderAgentName: 'peer',
+      targetAgentId: 'claude:lead',
+      targetAgentName: 'lead',
+      orchestrationStep: 'agent_reply',
+    },
+    {
+      type: 'text',
+      content: 'lead summary',
+      senderType: 'agent',
+      senderAgentId: 'claude:lead',
+      senderAgentName: 'lead',
+      targetAgentId: 'user',
+      targetAgentName: 'user',
+      orchestrationStep: 'agent_to_user',
+    },
+  ])
+  assert.deepEqual(broadcastEntries, persistedEntries)
 })
 
 test('WSGateway rejects invalid mention input without interrupting a running manager', async () => {
