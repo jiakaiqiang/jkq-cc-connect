@@ -16,6 +16,7 @@ import { refreshConversationStateFromRecentHistory } from '../store/conversation
 import { appendMessageContent, getRecentMessagesWindow, saveMessage } from '../store/messages.js'
 import { CCManager } from '../cc/manager.js'
 import { buildExecutionInput } from '../cc/context.js'
+import { runMentionConversation } from '../agents/orchestrator.js'
 import { parseClientMessage, serializeServerMsg } from './protocol.js'
 import { logger } from '../utils/logger.js'
 import { getFallbackTools, getVibeTools, planToolRoute } from '../tools/vibe.js'
@@ -198,12 +199,7 @@ export class WSGateway {
       if (slash.kind === 'tool-command') {
         this.clearStreamingMessage(session.id)
         touchSession(session.id)
-        const userMessage = saveMessage(session.id, 'user', text)
-        const renamedSession = updateSessionNameFromFirstMessage(session.id, text)
-        if (renamedSession) {
-          this.broadcast(session.id, { type: 'session_updated', session: renamedSession })
-        }
-        this.broadcast(session.id, { type: 'user', content: text, messageId: userMessage.id })
+        this.persistAndBroadcastUserMessage(session.id, text)
 
         const manager = this.getManager(session.id)
         if (manager.isRunning()) {
@@ -224,7 +220,56 @@ export class WSGateway {
       .sort((left, right) => left.order - right.order)
       .filter((mention, index, array) => array.findIndex(item => item.agentId === mention.agentId) === index)
     if (orderedMentions.length) {
-      await this.handleMentionConversation(session, text, orderedMentions)
+      const toolId = orderedMentions[0].toolId
+      const tools = getVibeTools()
+      const tool = tools.find(item => item.id === toolId)
+      if (!tool?.supportsExecution) {
+        this.broadcast(session.id, {
+          type: 'error',
+          message: tool?.detail || 'The selected CLI tool is not currently available.',
+          source: 'system',
+          sourceLabel: getSourceLabel('system'),
+        })
+        return
+      }
+
+      this.clearStreamingMessage(session.id)
+      touchSession(session.id)
+
+      const manager = this.getManager(session.id)
+      if (manager.isRunning()) {
+        await manager.stop()
+      }
+
+      const result = await runMentionConversation({
+        sessionId: session.id,
+        projectDir: session.projectDir,
+        text,
+        mentions: orderedMentions,
+        tool,
+        manager,
+        onUserMessage: (message) => {
+          this.persistAndBroadcastUserMessage(session.id, message.content, {
+            senderType: message.senderType,
+            orchestrationStep: message.orchestrationStep,
+          })
+        },
+        savePublicMessage: (message) => {
+          this.savePublicTextMessage(session.id, message)
+        },
+        publish: (message) => {
+          this.broadcast(session.id, message)
+        },
+      })
+
+      if (!result.ok) {
+        this.broadcast(session.id, {
+          type: 'error',
+          message: result.errorMessage || 'The mention conversation could not be completed.',
+          source: 'system',
+          sourceLabel: getSourceLabel('system'),
+        })
+      }
       return
     }
     // 普通输入先经过工具路由器，决定这一轮由 Claude / Codex / OpenCode 谁来处理。
@@ -256,12 +301,7 @@ export class WSGateway {
 
     this.clearStreamingMessage(session.id)
     touchSession(session.id)
-    const userMessage = saveMessage(session.id, 'user', text)
-    const renamedSession = updateSessionNameFromFirstMessage(session.id, text)
-    if (renamedSession) {
-      this.broadcast(session.id, { type: 'session_updated', session: renamedSession })
-    }
-    this.broadcast(session.id, { type: 'user', content: text, messageId: userMessage.id })
+    this.persistAndBroadcastUserMessage(session.id, text)
 
     const manager = this.getManager(session.id)
     if (manager.isRunning()) {
@@ -685,6 +725,30 @@ export class WSGateway {
     if (!current) return
     if (type && current.type !== type) return
     this.streamingMessages.delete(sessionId)
+  }
+
+  private persistAndBroadcastUserMessage(
+    sessionId: string,
+    content: string,
+    metadata: Pick<Extract<ServerMsg, { type: 'user' }>, 'senderType' | 'orchestrationStep'> = {},
+  ) {
+    const userMessage = saveMessage(sessionId, 'user', content, metadata)
+    const renamedSession = updateSessionNameFromFirstMessage(sessionId, content)
+    if (renamedSession) {
+      this.broadcast(sessionId, { type: 'session_updated', session: renamedSession })
+    }
+    this.broadcast(sessionId, {
+      type: 'user',
+      content,
+      messageId: userMessage.id,
+      ...metadata,
+    })
+    return userMessage
+  }
+
+  private savePublicTextMessage(sessionId: string, message: Extract<ServerMsg, { type: 'text' }>) {
+    const { type: _type, content, messageId, ...metadata } = message
+    saveMessage(sessionId, 'text', content, metadata, messageId)
   }
 
   private persistManagerSessionState(

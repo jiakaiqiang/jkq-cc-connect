@@ -1,5 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import type {
   AgentMention,
@@ -40,10 +42,111 @@ function createTool(agents: ToolAgentInfo[]): VibeToolInfo {
   }
 }
 
+const TEST_HOME = join(process.cwd(), '.tmp', 'mention-orchestrator-home')
+const TEST_BIN = join(TEST_HOME, 'bin')
+
+let testEnvironmentReady = false
+
+function ensureGatewayTestEnvironment() {
+  if (testEnvironmentReady) return
+
+  mkdirSync(TEST_BIN, { recursive: true })
+  writeFileSync(join(TEST_BIN, 'claude.cmd'), '@echo off\r\necho 1.0.0\r\n')
+
+  process.env.HOME = TEST_HOME
+  process.env.USERPROFILE = TEST_HOME
+  process.env.PATH = `${TEST_BIN};${process.env.PATH || ''}`
+  testEnvironmentReady = true
+}
+
 async function loadRunMentionConversation() {
   const module = await import('../src/agents/orchestrator.ts')
   return module.runMentionConversation
 }
+
+async function loadGatewayTestModules() {
+  ensureGatewayTestEnvironment()
+
+  const [
+    { WSGateway },
+    { getDb, applyMigrations },
+    { createSession },
+    { getMessages },
+  ] = await Promise.all([
+    import('../src/ws/gateway.ts'),
+    import('../src/store/database.ts'),
+    import('../src/store/sessions.ts'),
+    import('../src/store/messages.ts'),
+  ])
+
+  const db = getDb()
+  applyMigrations(db)
+
+  return { WSGateway, createSession, getMessages }
+}
+
+test('WSGateway mention input persists and broadcasts the orchestration user-request lifecycle', async () => {
+  const { WSGateway, createSession, getMessages } = await loadGatewayTestModules()
+  const session = createSession({ projectDir: 'D:/demo/jkq-cc-connect' })
+  const gateway = new WSGateway() as any
+  const broadcasts: ServerMsg[] = []
+
+  let running = true
+  const manager = {
+    isRunning: () => running,
+    stop: async () => {
+      running = false
+    },
+    start: async () => ({
+      ok: true,
+      tool: 'claude',
+      producedOutput: true,
+      recoverable: false,
+      assistantText: 'lead summary',
+    }),
+  }
+
+  gateway.broadcast = (_sessionId: string, message: ServerMsg) => {
+    broadcasts.push(message)
+  }
+  gateway.clearStreamingMessage = () => undefined
+  gateway.getManager = () => manager
+
+  await gateway.handleInput(
+    session.id,
+    '@default answer this',
+    undefined,
+    [{ toolId: 'claude', agentId: 'claude:default', name: 'default', order: 0 }],
+  )
+
+  const persistedMessages = getMessages(session.id)
+  const persistedUserMessage = persistedMessages.find(message => message.type === 'user')
+  const persistedAgentReply = persistedMessages.find(message => message.type === 'text')
+  const broadcastUserMessage = broadcasts.find((message): message is Extract<ServerMsg, { type: 'user' }> => message.type === 'user')
+  const broadcastAgentReply = broadcasts.find((message): message is Extract<ServerMsg, { type: 'text' }> => message.type === 'text')
+
+  assert.ok(persistedUserMessage)
+  assert.equal(persistedUserMessage.metadata.senderType, 'user')
+  assert.equal(persistedUserMessage.metadata.orchestrationStep, 'user_request')
+
+  assert.ok(persistedAgentReply)
+  assert.equal(persistedAgentReply.content, 'lead summary')
+  assert.equal(persistedAgentReply.metadata.senderType, 'agent')
+  assert.equal(persistedAgentReply.metadata.senderAgentId, 'claude:default')
+  assert.equal(persistedAgentReply.metadata.targetAgentId, 'user')
+  assert.equal(persistedAgentReply.metadata.orchestrationStep, 'agent_to_user')
+
+  assert.ok(broadcastUserMessage)
+  assert.equal(broadcastUserMessage.senderType, 'user')
+  assert.equal(broadcastUserMessage.orchestrationStep, 'user_request')
+
+  assert.ok(broadcastAgentReply)
+  assert.equal(broadcastAgentReply.content, 'lead summary')
+  assert.equal(broadcastAgentReply.senderType, 'agent')
+  assert.equal(broadcastAgentReply.senderAgentId, 'claude:default')
+  assert.equal(broadcastAgentReply.targetAgentId, 'user')
+  assert.equal(broadcastAgentReply.orchestrationStep, 'agent_to_user')
+})
 
 test('runMentionConversation rejects mentions across different CLI tools', async () => {
   const mentions: AgentMention[] = [
