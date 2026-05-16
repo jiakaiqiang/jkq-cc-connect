@@ -1,0 +1,35 @@
+import type { Server as HttpServer } from 'node:http';
+export declare class WSGateway {
+    private wss;
+    private clients;
+    private managers;
+    private sessionModes;
+    private streamingMessages;
+    init(httpServer: HttpServer): void;
+    private handleMessage;
+    private getManager;
+    private handleInput;
+    private handleMentionConversation;
+    private resolveMentionAgent;
+    private buildLeadAgentPreamble;
+    private buildCollaboratorPreamble;
+    private buildLeadSummaryPreamble;
+    private broadcastAgentMessage;
+    private executeWithFallback;
+    private handleCCMessage;
+    private persistStreamingMessage;
+    private getManagerSource;
+    private getSourceMetadata;
+    private attachSource;
+    private clearStreamingMessage;
+    private persistManagerSessionState;
+    private sendSessionState;
+    private setSessionMode;
+    private sendToClient;
+    private broadcast;
+    private broadcastModeChanged;
+    private broadcastSystemText;
+    private buildFallbackNotice;
+    private buildFinalFailureMessage;
+    private describeFailureKind;
+}

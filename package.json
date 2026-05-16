@@ -1,0 +1,7 @@
+{
+  "name": "jkq-cc-connect",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mobile-first Claude Code remote operation platform",
+  "workspaces": ["server", "client"]
+}

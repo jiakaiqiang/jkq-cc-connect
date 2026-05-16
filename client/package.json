@@ -1,0 +1,38 @@
+{
+  "name": "@jkq-cc-connect/client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "test": "node --test --import tsx test/**/*.test.ts",
+    "preview": "vite preview",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:copy": "npm run build && npx cap copy android",
+    "android:apk": "powershell -ExecutionPolicy Bypass -File .\\scripts\\android-assemble-debug.ps1",
+    "android:release": "powershell -ExecutionPolicy Bypass -File .\\scripts\\android-assemble-release.ps1"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/cli": "^8.3.4",
+    "@capacitor/core": "^8.3.4",
+    "@tailwindcss/vite": "^4.3.0",
+    "diff2html": "^3.4.48",
+    "markdown-it": "^14.1.0",
+    "pinia": "^2.2.0",
+    "shiki": "^1.22.0",
+    "tailwindcss": "^4.3.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@vitejs/plugin-vue": "^5.1.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0",
+    "vite-plugin-pwa": "^0.20.0",
+    "vue-tsc": "^2.1.0"
+  }
+}

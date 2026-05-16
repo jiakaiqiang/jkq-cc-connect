@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npx vue-tsc *)",
+      "Bash(npx vite *)",
+      "Bash(npm run *)",
+      "mcp__chrome-mcp-stdio__chrome_navigate",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //PID 67120 //F)",
+      "Bash(taskkill //PID 67904 //F)",
+      "Bash(where claude *)",
+      "Bash(awk '{print $5}')",
+      "Bash(xargs -I{} taskkill //PID {} //F)",
+      "Bash(curl *)",
+      "Bash(node *)",
+      "Bash(timeout 10 claude --output-format stream-json --print \"say hello world\")",
+      "Bash(timeout 15 claude --output-format stream-json --verbose)",
+      "Bash(timeout 20 claude --output-format stream-json --verbose)",
+      "Bash(tasklist)",
+      "Bash(powershell *)",
+      "Bash(taskkill *)",
+      "WebSearch",
+      "WebFetch(domain:docs.anthropic.com)",
+      "Skill(browse)",
+      "mcp__chrome-mcp-stdio__chrome_console",
+      "Bash(git add *)"
+    ]
+  }
+}
