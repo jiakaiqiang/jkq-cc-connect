@@ -142,8 +142,17 @@ test('WSGateway mention input persists and broadcasts the orchestration user-req
   const persistedMessages = getMessages(session.id)
   const persistedUserMessage = persistedMessages.find(message => message.type === 'user')
   const persistedAgentReply = persistedMessages.find(message => message.type === 'text')
+  const persistedAgentReplyIndex = persistedMessages.findIndex((message) =>
+    message.type === 'text'
+    && message.metadata.orchestrationStep === 'agent_to_user'
+  )
   const broadcastUserMessage = broadcasts.find((message): message is Extract<ServerMsg, { type: 'user' }> => message.type === 'user')
   const broadcastAgentReply = broadcasts.find((message): message is Extract<ServerMsg, { type: 'text' }> => message.type === 'text')
+  const broadcastUserMessageIndex = broadcasts.findIndex((message) => message.type === 'user')
+  const broadcastAgentReplyIndex = broadcasts.findIndex((message) =>
+    message.type === 'text'
+    && message.orchestrationStep === 'agent_to_user'
+  )
 
   assert.ok(persistedUserMessage)
   assert.equal(persistedUserMessage.metadata.senderType, 'user')
@@ -155,6 +164,9 @@ test('WSGateway mention input persists and broadcasts the orchestration user-req
   assert.equal(persistedAgentReply.metadata.senderAgentId, 'claude:default')
   assert.equal(persistedAgentReply.metadata.targetAgentId, 'user')
   assert.equal(persistedAgentReply.metadata.orchestrationStep, 'agent_to_user')
+  assert.ok(persistedUserMessage.seq < persistedAgentReply.seq)
+  assert.ok(persistedAgentReplyIndex >= 0)
+  assert.equal(persistedMessages[persistedAgentReplyIndex - 1]?.id, persistedUserMessage.id)
 
   assert.ok(broadcastUserMessage)
   assert.equal(broadcastUserMessage.senderType, 'user')
@@ -166,6 +178,9 @@ test('WSGateway mention input persists and broadcasts the orchestration user-req
   assert.equal(broadcastAgentReply.senderAgentId, 'claude:default')
   assert.equal(broadcastAgentReply.targetAgentId, 'user')
   assert.equal(broadcastAgentReply.orchestrationStep, 'agent_to_user')
+  assert.ok(broadcastUserMessageIndex >= 0)
+  assert.ok(broadcastAgentReplyIndex >= 0)
+  assert.ok(broadcastUserMessageIndex < broadcastAgentReplyIndex)
 })
 
 test('WSGateway rejects invalid mention input without interrupting a running manager', async () => {
@@ -173,6 +188,7 @@ test('WSGateway rejects invalid mention input without interrupting a running man
   const session = createSession({ projectDir: 'D:/demo/jkq-cc-connect' })
   const gateway = new WSGateway() as any
   const broadcasts: ServerMsg[] = []
+  const clearStreamingMessageCalls: Array<{ sessionId: string; type?: 'text' | 'thinking' }> = []
 
   let stopCalls = 0
   const manager = {
@@ -188,7 +204,9 @@ test('WSGateway rejects invalid mention input without interrupting a running man
   gateway.broadcast = (_sessionId: string, message: ServerMsg) => {
     broadcasts.push(message)
   }
-  gateway.clearStreamingMessage = () => undefined
+  gateway.clearStreamingMessage = (sessionId: string, type?: 'text' | 'thinking') => {
+    clearStreamingMessageCalls.push({ sessionId, type })
+  }
   gateway.getManager = () => manager
 
   await gateway.handleInput(
@@ -207,6 +225,7 @@ test('WSGateway rejects invalid mention input without interrupting a running man
   const broadcastError = broadcasts.find((message): message is Extract<ServerMsg, { type: 'error' }> => message.type === 'error')
 
   assert.equal(stopCalls, 0)
+  assert.equal(clearStreamingMessageCalls.length, 0)
   assert.equal(persistedUserMessages.length, 0)
   assert.equal(broadcastUserMessages.length, 0)
   assert.ok(broadcastError)
