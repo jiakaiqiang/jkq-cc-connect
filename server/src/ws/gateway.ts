@@ -260,7 +260,7 @@ export class WSGateway {
           this.savePublicTextMessage(session.id, message)
         },
         publish: (message) => {
-          this.broadcast(session.id, message)
+          this.broadcast(session.id, this.withMentionSourceCompatibility(message))
         },
       })
 
@@ -542,8 +542,38 @@ export class WSGateway {
   }
 
   private savePublicTextMessage(sessionId: string, message: Extract<ServerMsg, { type: 'text' }>) {
-    const { type: _type, content, messageId, ...metadata } = message
+    const { type: _type, content, messageId, ...metadata } = this.withMentionSourceCompatibility(message)
     saveMessage(sessionId, 'text', content, metadata, messageId)
+  }
+
+  private withMentionSourceCompatibility(message: Extract<ServerMsg, { type: 'text' }>) {
+    if (message.source || message.senderType !== 'agent') return message
+
+    const source = this.getMentionMessageSource(message.senderAgentId)
+    if (!source) return message
+
+    const sourceAgent = message.senderAgentName || undefined
+    const sourceAgentLabel = message.senderAgentName || undefined
+    const sourceLabel = sourceAgentLabel
+      ? `${getSourceLabel(source)} / ${sourceAgentLabel}`
+      : getSourceLabel(source)
+
+    return {
+      ...message,
+      source,
+      sourceLabel,
+      sourceAgent,
+      sourceAgentLabel,
+    }
+  }
+
+  private getMentionMessageSource(senderAgentId: string | undefined): VibeToolId | undefined {
+    if (!senderAgentId) return undefined
+
+    const [source] = senderAgentId.split(':', 1)
+    return source === 'claude' || source === 'codex' || source === 'opencode'
+      ? source
+      : undefined
   }
 
   private persistManagerSessionState(
