@@ -1,7 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { runMentionConversation } from '../src/agents/orchestrator.ts'
 import type {
   AgentMention,
   OrchestrationMetadata,
@@ -41,12 +40,18 @@ function createTool(agents: ToolAgentInfo[]): VibeToolInfo {
   }
 }
 
+async function loadRunMentionConversation() {
+  const module = await import('../src/agents/orchestrator.ts')
+  return module.runMentionConversation
+}
+
 test('runMentionConversation rejects mentions across different CLI tools', async () => {
   const mentions: AgentMention[] = [
     { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
     { toolId: 'codex', agentId: 'codex:peer', name: 'peer', order: 1 },
   ]
 
+  const runMentionConversation = await loadRunMentionConversation()
   const result = await runMentionConversation({
     sessionId: 's1',
     projectDir: 'D:/demo/jkq-cc-connect',
@@ -68,6 +73,21 @@ test('runMentionConversation emits structured metadata for agent-to-agent and ag
   const leadAgent = createAgent('lead')
   const peerAgent = createAgent('peer')
   const agents = [leadAgent, peerAgent]
+  const userMessageFixture = {
+    type: 'user',
+    content: '@lead check @peer',
+    messageId: 'user-message-1',
+    senderType: 'user',
+    orchestrationStep: 'user_request',
+  } satisfies Extract<ServerMsg, { type: 'user' }>
+
+  assert.deepEqual(userMessageFixture, {
+    type: 'user',
+    content: '@lead check @peer',
+    messageId: 'user-message-1',
+    senderType: 'user',
+    orchestrationStep: 'user_request',
+  })
 
   let call = 0
   const manager = {
@@ -80,6 +100,7 @@ test('runMentionConversation emits structured metadata for agent-to-agent and ag
     },
   }
 
+  const runMentionConversation = await loadRunMentionConversation()
   await runMentionConversation({
     sessionId: 's1',
     projectDir: 'D:/demo/jkq-cc-connect',
@@ -95,61 +116,45 @@ test('runMentionConversation emits structured metadata for agent-to-agent and ag
     onUserMessage: () => undefined,
   })
 
-  assert.ok(published.some(item => item.orchestrationStep === 'agent_to_agent'))
-  assert.ok(published.some(item => item.orchestrationStep === 'agent_reply'))
-  assert.ok(published.some(item => item.orchestrationStep === 'agent_to_user'))
+  const orchestrationEntries = published
+    .filter((item): item is ServerMsg & Partial<OrchestrationMetadata> & Required<Pick<OrchestrationMetadata, 'orchestrationStep'>> => !!item.orchestrationStep)
+    .map(item => ({
+      type: item.type,
+      senderType: item.senderType,
+      senderAgentId: item.senderAgentId,
+      senderAgentName: item.senderAgentName,
+      targetAgentId: item.targetAgentId,
+      targetAgentName: item.targetAgentName,
+      orchestrationStep: item.orchestrationStep,
+    }))
 
-  const agentToAgent = published.find(item => item.orchestrationStep === 'agent_to_agent')
-  assert.deepEqual(
+  assert.deepEqual(orchestrationEntries, [
     {
-      senderType: agentToAgent?.senderType,
-      senderAgentId: agentToAgent?.senderAgentId,
-      senderAgentName: agentToAgent?.senderAgentName,
-      targetAgentId: agentToAgent?.targetAgentId,
-      targetAgentName: agentToAgent?.targetAgentName,
-    },
-    {
+      type: 'text',
       senderType: 'agent',
       senderAgentId: leadAgent.id,
       senderAgentName: leadAgent.name,
       targetAgentId: peerAgent.id,
       targetAgentName: peerAgent.name,
-    },
-  )
-
-  const agentReply = published.find(item => item.orchestrationStep === 'agent_reply')
-  assert.deepEqual(
-    {
-      senderType: agentReply?.senderType,
-      senderAgentId: agentReply?.senderAgentId,
-      senderAgentName: agentReply?.senderAgentName,
-      targetAgentId: agentReply?.targetAgentId,
-      targetAgentName: agentReply?.targetAgentName,
+      orchestrationStep: 'agent_to_agent',
     },
     {
+      type: 'text',
       senderType: 'agent',
       senderAgentId: peerAgent.id,
       senderAgentName: peerAgent.name,
       targetAgentId: leadAgent.id,
       targetAgentName: leadAgent.name,
-    },
-  )
-
-  const agentToUser = published.find(item => item.orchestrationStep === 'agent_to_user')
-  assert.deepEqual(
-    {
-      senderType: agentToUser?.senderType,
-      senderAgentId: agentToUser?.senderAgentId,
-      senderAgentName: agentToUser?.senderAgentName,
-      targetAgentId: agentToUser?.targetAgentId,
-      targetAgentName: agentToUser?.targetAgentName,
+      orchestrationStep: 'agent_reply',
     },
     {
+      type: 'text',
       senderType: 'agent',
       senderAgentId: leadAgent.id,
       senderAgentName: leadAgent.name,
       targetAgentId: 'user',
       targetAgentName: 'user',
+      orchestrationStep: 'agent_to_user',
     },
-  )
+  ])
 })
