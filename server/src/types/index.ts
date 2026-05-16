@@ -160,6 +160,9 @@ export type ServerMsg =
   | { type: 'session_state'; messages: Message[]; session: SessionInfo; hasMore: boolean; oldestSeq: number | null }
   | { type: 'pong' }
 
+type Assert<T extends true> = T
+type _UserServerMsgContract = Assert<Extract<ServerMsg, { type: 'user' }> extends { senderType?: 'user'; orchestrationStep?: 'user_request' } ? true : false>
+
 // ===== HTTP API Types =====
 export interface FileEntry {
   name: string

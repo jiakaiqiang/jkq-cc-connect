@@ -73,21 +73,6 @@ test('runMentionConversation emits structured metadata for agent-to-agent and ag
   const leadAgent = createAgent('lead')
   const peerAgent = createAgent('peer')
   const agents = [leadAgent, peerAgent]
-  const userMessageFixture = {
-    type: 'user',
-    content: '@lead check @peer',
-    messageId: 'user-message-1',
-    senderType: 'user',
-    orchestrationStep: 'user_request',
-  } satisfies Extract<ServerMsg, { type: 'user' }>
-
-  assert.deepEqual(userMessageFixture, {
-    type: 'user',
-    content: '@lead check @peer',
-    messageId: 'user-message-1',
-    senderType: 'user',
-    orchestrationStep: 'user_request',
-  })
 
   let call = 0
   const manager = {
