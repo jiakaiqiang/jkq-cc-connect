@@ -68,6 +68,58 @@ test('runMentionConversation rejects mentions across different CLI tools', async
   assert.match(result.errorMessage || '', /same CLI tool/i)
 })
 
+test('runMentionConversation rejects more than 3 mentioned agents', async () => {
+  const mentions: AgentMention[] = [
+    { toolId: 'claude', agentId: 'claude:a', name: 'a', order: 0 },
+    { toolId: 'claude', agentId: 'claude:b', name: 'b', order: 1 },
+    { toolId: 'claude', agentId: 'claude:c', name: 'c', order: 2 },
+    { toolId: 'claude', agentId: 'claude:d', name: 'd', order: 3 },
+  ]
+
+  const runMentionConversation = await loadRunMentionConversation()
+  const result = await runMentionConversation({
+    sessionId: 's1',
+    projectDir: 'D:/demo/jkq-cc-connect',
+    text: '@a ask @b @c @d',
+    mentions,
+    tool: createTool([createAgent('a'), createAgent('b'), createAgent('c'), createAgent('d')]),
+    manager: {} as never,
+    savePublicMessage: () => undefined,
+    publish: () => undefined,
+    onUserMessage: () => undefined,
+  })
+
+  assert.equal(result.ok, false)
+  assert.match(result.errorMessage || '', /at most 3 agents/i)
+})
+
+test('runMentionConversation fails when a single mentioned agent returns blank assistant text', async () => {
+  const published: ServerMsg[] = []
+  const manager = {
+    isRunning: () => false,
+    start: async () => ({ ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: '   ' }),
+  }
+
+  const runMentionConversation = await loadRunMentionConversation()
+  const result = await runMentionConversation({
+    sessionId: 's1',
+    projectDir: 'D:/demo/jkq-cc-connect',
+    text: '@lead answer this',
+    mentions: [
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 0 },
+    ],
+    tool: createTool([createAgent('lead')]),
+    manager: manager as never,
+    savePublicMessage: (message) => published.push(message),
+    publish: (message) => published.push(message),
+    onUserMessage: () => undefined,
+  })
+
+  assert.equal(result.ok, false)
+  assert.match(result.errorMessage || '', /did not provide a usable reply/i)
+  assert.equal(published.length, 0)
+})
+
 test('runMentionConversation emits structured metadata for agent-to-agent and agent-to-user messages', async () => {
   const saved: Array<ServerMsg & Partial<OrchestrationMetadata>> = []
   const published: Array<ServerMsg & Partial<OrchestrationMetadata>> = []
@@ -158,6 +210,48 @@ test('runMentionConversation emits structured metadata for agent-to-agent and ag
 
   assert.deepEqual(savedEntries, expectedEntries)
   assert.deepEqual(publishedEntries, expectedEntries)
+})
+
+test('runMentionConversation normalizes mention order before resolving lead and collaborators', async () => {
+  const startCalls: Array<{ requestedAgentName?: string | null; preamble?: string }> = []
+  const leadAgent = createAgent('lead')
+  const peerAgent = createAgent('peer')
+
+  let call = 0
+  const manager = {
+    isRunning: () => false,
+    start: async (_projectDir: string, _text: string, _toolId: string, options?: { requestedAgentName?: string | null; preamble?: string }) => {
+      call += 1
+      startCalls.push({
+        requestedAgentName: options?.requestedAgentName,
+        preamble: options?.preamble,
+      })
+
+      return call === 1
+        ? { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'peer reply' }
+        : { ok: true, tool: 'claude', producedOutput: true, recoverable: false, assistantText: 'lead summary' }
+    },
+  }
+
+  const runMentionConversation = await loadRunMentionConversation()
+  const result = await runMentionConversation({
+    sessionId: 's1',
+    projectDir: 'D:/demo/jkq-cc-connect',
+    text: '@peer check with @lead',
+    mentions: [
+      { toolId: 'claude', agentId: 'claude:peer', name: 'peer', order: 2 },
+      { toolId: 'claude', agentId: 'claude:lead', name: 'lead', order: 1 },
+    ],
+    tool: createTool([leadAgent, peerAgent]),
+    manager: manager as never,
+    savePublicMessage: () => undefined,
+    publish: () => undefined,
+    onUserMessage: () => undefined,
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(startCalls.map((entry) => entry.requestedAgentName), ['peer', 'lead'])
+  assert.match(startCalls[0].preamble || '', /lead/i)
 })
 
 test('runMentionConversation falls back to a visible collaborator reply and still completes the lead summary', async () => {

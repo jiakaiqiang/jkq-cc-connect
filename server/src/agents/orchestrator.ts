@@ -73,16 +73,18 @@ export async function runMentionConversation(context: MentionConversationContext
     if (!leadResult.ok) return leadResult
 
     const summary = getUsableAssistantText(leadResult)
-    if (summary) {
-      emitPublicMessage(context, {
-        type: 'text',
-        content: summary,
-        messageId: crypto.randomUUID(),
-        ...buildMetadata(leadAgent, userTarget, 'agent_to_user'),
-      })
+    if (!summary) {
+      return createFailureResult(context.tool.id, `${leadAgent.name} did not provide a usable reply.`)
     }
 
-    return { ...leadResult, assistantText: summary || leadResult.assistantText }
+    emitPublicMessage(context, {
+      type: 'text',
+      content: summary,
+      messageId: crypto.randomUUID(),
+      ...buildMetadata(leadAgent, userTarget, 'agent_to_user'),
+    })
+
+    return { ...leadResult, assistantText: summary }
   }
 
   const collaboratorReplies: CollaboratorReply[] = []
@@ -146,16 +148,18 @@ export async function runMentionConversation(context: MentionConversationContext
 }
 
 function validateMentions(tool: VibeToolInfo, mentions: AgentMention[]): ({ ok: true } & ResolvedMentions) | { ok: false; errorMessage: string } {
-  if (!mentions.length) {
+  const normalizedMentions = [...mentions].sort((left, right) => left.order - right.order)
+
+  if (!normalizedMentions.length) {
     return { ok: false, errorMessage: 'At least one mentioned agent is required.' }
   }
 
-  if (mentions.length > MAX_MENTIONED_AGENTS) {
+  if (normalizedMentions.length > MAX_MENTIONED_AGENTS) {
     return { ok: false, errorMessage: 'At most 3 agents can participate in a single mention conversation.' }
   }
 
-  const toolId = mentions[0].toolId
-  if (mentions.some((mention) => mention.toolId !== toolId)) {
+  const toolId = normalizedMentions[0].toolId
+  if (normalizedMentions.some((mention) => mention.toolId !== toolId)) {
     return { ok: false, errorMessage: 'All mentioned agents must belong to the same CLI tool.' }
   }
 
@@ -163,12 +167,12 @@ function validateMentions(tool: VibeToolInfo, mentions: AgentMention[]): ({ ok: 
     return { ok: false, errorMessage: 'The selected CLI tool does not match the mentioned agents.' }
   }
 
-  const leadAgent = resolveAgent(tool, mentions[0])
+  const leadAgent = resolveAgent(tool, normalizedMentions[0])
   if (!leadAgent) {
-    return { ok: false, errorMessage: `Unable to resolve agent ${mentions[0].name}.` }
+    return { ok: false, errorMessage: `Unable to resolve agent ${normalizedMentions[0].name}.` }
   }
 
-  const collaboratorAgents = mentions.slice(1).map((mention) => resolveAgent(tool, mention))
+  const collaboratorAgents = normalizedMentions.slice(1).map((mention) => resolveAgent(tool, mention))
   if (collaboratorAgents.some((agent) => !agent)) {
     return { ok: false, errorMessage: 'One or more mentioned agents could not be resolved for the current CLI.' }
   }
