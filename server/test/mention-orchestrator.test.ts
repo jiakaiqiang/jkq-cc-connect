@@ -69,6 +69,7 @@ test('runMentionConversation rejects mentions across different CLI tools', async
 })
 
 test('runMentionConversation emits structured metadata for agent-to-agent and agent-to-user messages', async () => {
+  const saved: Array<ServerMsg & Partial<OrchestrationMetadata>> = []
   const published: Array<ServerMsg & Partial<OrchestrationMetadata>> = []
   const leadAgent = createAgent('lead')
   const peerAgent = createAgent('peer')
@@ -96,24 +97,12 @@ test('runMentionConversation emits structured metadata for agent-to-agent and ag
     ],
     tool: createTool(agents),
     manager: manager as never,
-    savePublicMessage: (message) => published.push(message),
+    savePublicMessage: (message) => saved.push(message),
     publish: (message) => published.push(message),
     onUserMessage: () => undefined,
   })
 
-  const orchestrationEntries = published
-    .filter((item): item is ServerMsg & Partial<OrchestrationMetadata> & Required<Pick<OrchestrationMetadata, 'orchestrationStep'>> => !!item.orchestrationStep)
-    .map(item => ({
-      type: item.type,
-      senderType: item.senderType,
-      senderAgentId: item.senderAgentId,
-      senderAgentName: item.senderAgentName,
-      targetAgentId: item.targetAgentId,
-      targetAgentName: item.targetAgentName,
-      orchestrationStep: item.orchestrationStep,
-    }))
-
-  assert.deepEqual(orchestrationEntries, [
+  const expectedEntries = [
     {
       type: 'text',
       senderType: 'agent',
@@ -141,10 +130,38 @@ test('runMentionConversation emits structured metadata for agent-to-agent and ag
       targetAgentName: 'user',
       orchestrationStep: 'agent_to_user',
     },
-  ])
+  ] as const
+
+  const savedEntries = saved
+    .filter((item): item is ServerMsg & Partial<OrchestrationMetadata> & Required<Pick<OrchestrationMetadata, 'orchestrationStep'>> => !!item.orchestrationStep)
+    .map(item => ({
+      type: item.type,
+      senderType: item.senderType,
+      senderAgentId: item.senderAgentId,
+      senderAgentName: item.senderAgentName,
+      targetAgentId: item.targetAgentId,
+      targetAgentName: item.targetAgentName,
+      orchestrationStep: item.orchestrationStep,
+    }))
+
+  const publishedEntries = published
+    .filter((item): item is ServerMsg & Partial<OrchestrationMetadata> & Required<Pick<OrchestrationMetadata, 'orchestrationStep'>> => !!item.orchestrationStep)
+    .map(item => ({
+      type: item.type,
+      senderType: item.senderType,
+      senderAgentId: item.senderAgentId,
+      senderAgentName: item.senderAgentName,
+      targetAgentId: item.targetAgentId,
+      targetAgentName: item.targetAgentName,
+      orchestrationStep: item.orchestrationStep,
+    }))
+
+  assert.deepEqual(savedEntries, expectedEntries)
+  assert.deepEqual(publishedEntries, expectedEntries)
 })
 
 test('runMentionConversation falls back to a visible collaborator reply and still completes the lead summary', async () => {
+  const saved: ServerMsg[] = []
   const published: ServerMsg[] = []
   const leadAgent = createAgent('lead')
   const peerAgent = createAgent('peer')
@@ -177,7 +194,7 @@ test('runMentionConversation falls back to a visible collaborator reply and stil
     ],
     tool: createTool([leadAgent, peerAgent]),
     manager: manager as never,
-    savePublicMessage: (message) => published.push(message),
+    savePublicMessage: (message) => saved.push(message),
     publish: (message) => published.push(message),
     onUserMessage: () => undefined,
   })
@@ -188,12 +205,20 @@ test('runMentionConversation falls back to a visible collaborator reply and stil
   assert.match(startCalls[1].preamble || '', /peer/i)
   assert.match(startCalls[1].preamble || '', /did not provide a usable reply/i)
 
-  const collaboratorReply = published.find((message) =>
+  const savedCollaboratorReply = saved.find((message) =>
     message.type === 'text'
     && message.orchestrationStep === 'agent_reply'
     && message.senderAgentId === peerAgent.id
   )
 
-  assert.ok(collaboratorReply)
-  assert.match(collaboratorReply.content, /did not provide a usable reply/i)
+  const publishedCollaboratorReply = published.find((message) =>
+    message.type === 'text'
+    && message.orchestrationStep === 'agent_reply'
+    && message.senderAgentId === peerAgent.id
+  )
+
+  assert.ok(savedCollaboratorReply)
+  assert.match(savedCollaboratorReply.content, /did not provide a usable reply/i)
+  assert.ok(publishedCollaboratorReply)
+  assert.match(publishedCollaboratorReply.content, /did not provide a usable reply/i)
 })

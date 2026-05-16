@@ -196,7 +196,7 @@ function emitUserMessage(context: MentionConversationContext) {
 
 function emitPublicMessage(context: MentionConversationContext, message: PublicTextMessage) {
   context.savePublicMessage(message)
-  void context.publish
+  context.publish(message)
 }
 
 function buildMetadata(
