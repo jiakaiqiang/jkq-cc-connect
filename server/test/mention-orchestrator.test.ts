@@ -65,7 +65,9 @@ test('runMentionConversation rejects mentions across different CLI tools', async
 
 test('runMentionConversation emits structured metadata for agent-to-agent and agent-to-user messages', async () => {
   const published: Array<ServerMsg & Partial<OrchestrationMetadata>> = []
-  const agents = [createAgent('lead'), createAgent('peer')]
+  const leadAgent = createAgent('lead')
+  const peerAgent = createAgent('peer')
+  const agents = [leadAgent, peerAgent]
 
   let call = 0
   const manager = {
@@ -96,4 +98,58 @@ test('runMentionConversation emits structured metadata for agent-to-agent and ag
   assert.ok(published.some(item => item.orchestrationStep === 'agent_to_agent'))
   assert.ok(published.some(item => item.orchestrationStep === 'agent_reply'))
   assert.ok(published.some(item => item.orchestrationStep === 'agent_to_user'))
+
+  const agentToAgent = published.find(item => item.orchestrationStep === 'agent_to_agent')
+  assert.deepEqual(
+    {
+      senderType: agentToAgent?.senderType,
+      senderAgentId: agentToAgent?.senderAgentId,
+      senderAgentName: agentToAgent?.senderAgentName,
+      targetAgentId: agentToAgent?.targetAgentId,
+      targetAgentName: agentToAgent?.targetAgentName,
+    },
+    {
+      senderType: 'agent',
+      senderAgentId: leadAgent.id,
+      senderAgentName: leadAgent.name,
+      targetAgentId: peerAgent.id,
+      targetAgentName: peerAgent.name,
+    },
+  )
+
+  const agentReply = published.find(item => item.orchestrationStep === 'agent_reply')
+  assert.deepEqual(
+    {
+      senderType: agentReply?.senderType,
+      senderAgentId: agentReply?.senderAgentId,
+      senderAgentName: agentReply?.senderAgentName,
+      targetAgentId: agentReply?.targetAgentId,
+      targetAgentName: agentReply?.targetAgentName,
+    },
+    {
+      senderType: 'agent',
+      senderAgentId: peerAgent.id,
+      senderAgentName: peerAgent.name,
+      targetAgentId: leadAgent.id,
+      targetAgentName: leadAgent.name,
+    },
+  )
+
+  const agentToUser = published.find(item => item.orchestrationStep === 'agent_to_user')
+  assert.deepEqual(
+    {
+      senderType: agentToUser?.senderType,
+      senderAgentId: agentToUser?.senderAgentId,
+      senderAgentName: agentToUser?.senderAgentName,
+      targetAgentId: agentToUser?.targetAgentId,
+      targetAgentName: agentToUser?.targetAgentName,
+    },
+    {
+      senderType: 'agent',
+      senderAgentId: leadAgent.id,
+      senderAgentName: leadAgent.name,
+      targetAgentId: 'user',
+      targetAgentName: 'user',
+    },
+  )
 })

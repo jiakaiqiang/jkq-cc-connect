@@ -123,11 +123,11 @@ export interface AgentMention {
 
 export interface OrchestrationMetadata {
   senderType: 'user' | 'agent' | 'system'
-  senderAgentId?: string
-  senderAgentName?: string
-  targetAgentId?: string
-  targetAgentName?: string
-  orchestrationStep?: OrchestrationStep
+  senderAgentId: string
+  senderAgentName: string
+  targetAgentId: string
+  targetAgentName: string
+  orchestrationStep: OrchestrationStep
 }
 
 // ===== Client → Server =====
