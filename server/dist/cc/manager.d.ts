@@ -13,6 +13,7 @@ export interface ToolExecutionOptions {
     requestedAgentName?: string | null;
     requestedAgentLabel?: string | null;
     preamble?: string;
+    suppressAssistantMessageBroadcast?: boolean;
 }
 export declare class CCManager {
     private proc;
@@ -48,6 +49,7 @@ export declare class CCManager {
     private resolveCommand;
     private resolveSpawnArgs;
     private isAssistantLikeMessage;
+    private broadcastExecutionMessage;
     private handleCodexEvent;
     private handleOpenCodeEvent;
     stop(): Promise<void>;

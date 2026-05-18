@@ -158,12 +158,12 @@ export class CCManager {
         // 三种工具在启动命令、输出格式、会话恢复方式上差异很大，
         // 所以分成独立 startXxx，保持每条执行链路易于调试。
         if (tool === 'codex') {
-            return this.startCodex(projectDir, preparedInput);
+            return this.startCodex(projectDir, preparedInput, options);
         }
         if (tool === 'opencode') {
-            return this.startOpenCode(projectDir, preparedInput);
+            return this.startOpenCode(projectDir, preparedInput, options);
         }
-        return this.startClaude(projectDir, preparedInput);
+        return this.startClaude(projectDir, preparedInput, options);
     }
     async startCommand(projectDir, tool, args) {
         if (this.isRunning())
@@ -230,7 +230,7 @@ export class CCManager {
             return false;
         }
     }
-    async startClaude(projectDir, inputText) {
+    async startClaude(projectDir, inputText, options) {
         try {
             const args = [
                 '--print',
@@ -299,7 +299,7 @@ export class CCManager {
                         if (msg.type === 'text' || msg.type === 'code' || msg.type === 'diff') {
                             assistantText += msg.content;
                         }
-                        this.broadcast?.(msg);
+                        this.broadcastExecutionMessage(msg, options);
                     });
                 });
                 this.proc.stderr?.on('data', (data) => {
@@ -351,7 +351,7 @@ export class CCManager {
             return createFailureResult('claude', err instanceof Error ? err.message : 'Failed to start Claude');
         }
     }
-    async startCodex(projectDir, inputText) {
+    async startCodex(projectDir, inputText, options) {
         try {
             const args = this.codexSessionId
                 ? [
@@ -428,7 +428,7 @@ export class CCManager {
                         const line = this.pendingBuffer.slice(0, newlineIndex).trim();
                         this.pendingBuffer = this.pendingBuffer.slice(newlineIndex + 1);
                         if (line) {
-                            const outcome = this.handleCodexEvent(line);
+                            const outcome = this.handleCodexEvent(line, options);
                             hasAssistantMessage = hasAssistantMessage || outcome.producedAssistantOutput;
                             if (outcome.producedAssistantOutput) {
                                 clearResponseTimeout();
@@ -454,7 +454,7 @@ export class CCManager {
                     logger.info(`Codex process exited (code ${code})`);
                     const tail = this.pendingBuffer.trim();
                     if (tail) {
-                        const outcome = this.handleCodexEvent(tail);
+                        const outcome = this.handleCodexEvent(tail, options);
                         hasAssistantMessage = hasAssistantMessage || outcome.producedAssistantOutput;
                         if (outcome.outputText)
                             assistantText += outcome.outputText;
@@ -485,7 +485,7 @@ export class CCManager {
             return createFailureResult('codex', err instanceof Error ? err.message : 'Failed to start Codex');
         }
     }
-    async startOpenCode(projectDir, inputText) {
+    async startOpenCode(projectDir, inputText, options) {
         try {
             const args = [
                 'run',
@@ -558,7 +558,7 @@ export class CCManager {
                         const line = this.pendingBuffer.slice(0, newlineIndex).trim();
                         this.pendingBuffer = this.pendingBuffer.slice(newlineIndex + 1);
                         if (line) {
-                            const outcome = this.handleOpenCodeEvent(line, () => {
+                            const outcome = this.handleOpenCodeEvent(line, options, () => {
                                 openCodeMessageId ||= crypto.randomUUID();
                                 return openCodeMessageId;
                             });
@@ -587,7 +587,7 @@ export class CCManager {
                     logger.info(`OpenCode process exited (code ${code})`);
                     const tail = this.pendingBuffer.trim();
                     if (tail) {
-                        const outcome = this.handleOpenCodeEvent(tail, () => {
+                        const outcome = this.handleOpenCodeEvent(tail, options, () => {
                             openCodeMessageId ||= crypto.randomUUID();
                             return openCodeMessageId;
                         });
@@ -707,7 +707,12 @@ export class CCManager {
                 return false;
         }
     }
-    handleCodexEvent(line) {
+    broadcastExecutionMessage(msg, options) {
+        if (options.suppressAssistantMessageBroadcast && this.isAssistantLikeMessage(msg))
+            return;
+        this.broadcast?.(msg);
+    }
+    handleCodexEvent(line, options) {
         try {
             const event = JSON.parse(line);
             if (event.type === 'thread.started' && typeof event.thread_id === 'string') {
@@ -716,11 +721,11 @@ export class CCManager {
                 return { producedAssistantOutput: false };
             }
             if (event.type === 'item.completed' && event.item?.type === 'agent_message' && typeof event.item.text === 'string') {
-                this.broadcast?.({
+                this.broadcastExecutionMessage({
                     type: 'text',
                     content: event.item.text,
                     messageId: crypto.randomUUID(),
-                });
+                }, options);
                 return { producedAssistantOutput: true, outputText: event.item.text };
             }
             if (event.type === 'error' && typeof event.message === 'string') {
@@ -749,18 +754,18 @@ export class CCManager {
         catch { /* ignore non-JSON noise from the wrapper */ }
         return { producedAssistantOutput: false };
     }
-    handleOpenCodeEvent(line, getMessageId) {
+    handleOpenCodeEvent(line, options, getMessageId) {
         try {
             const event = JSON.parse(line);
             if (typeof event.sessionID === 'string') {
                 this.openCodeSessionId = event.sessionID;
             }
             if (event.type === 'text' && typeof event.part?.text === 'string') {
-                this.broadcast?.({
+                this.broadcastExecutionMessage({
                     type: 'text',
                     content: event.part.text,
                     messageId: getMessageId(),
-                });
+                }, options);
                 return { producedAssistantOutput: true, outputText: event.part.text };
             }
             if (event.type === 'error') {

@@ -9,6 +9,7 @@ import DiffCard from './DiffCard.vue'
 import ToolUseCard from './ToolUseCard.vue'
 import ToolResultCard from './ToolResultCard.vue'
 import ConfirmCard from './ConfirmCard.vue'
+import { getMessageBubbleSourceProps } from './sourceLabel'
 
 const chat = useChatStore()
 const container = ref<HTMLElement>()
@@ -64,7 +65,7 @@ function getMessageComponent(msg: UIMessage) {
         props: {
           content: msg.content,
           role: 'assistant' as const,
-          sourceLabel: msg.metadata.sourceLabel as string | undefined,
+          ...getMessageBubbleSourceProps(msg.metadata),
         },
       }
     case 'thinking':
@@ -111,7 +112,7 @@ function getMessageComponent(msg: UIMessage) {
         props: {
           content: `[错误] ${msg.content}`,
           role: 'assistant' as const,
-          sourceLabel: msg.metadata.sourceLabel as string | undefined,
+          ...getMessageBubbleSourceProps(msg.metadata),
         },
       }
     default:

@@ -7,6 +7,7 @@ import { refreshConversationStateFromRecentHistory } from '../store/conversation
 import { appendMessageContent, getRecentMessagesWindow, saveMessage } from '../store/messages.js';
 import { CCManager } from '../cc/manager.js';
 import { buildExecutionInput } from '../cc/context.js';
+import { runMentionConversation, validateMentionConversationRequest } from '../agents/orchestrator.js';
 import { parseClientMessage, serializeServerMsg } from './protocol.js';
 import { logger } from '../utils/logger.js';
 import { getFallbackTools, getVibeTools, planToolRoute } from '../tools/vibe.js';
@@ -162,12 +163,7 @@ export class WSGateway {
             if (slash.kind === 'tool-command') {
                 this.clearStreamingMessage(session.id);
                 touchSession(session.id);
-                const userMessage = saveMessage(session.id, 'user', text);
-                const renamedSession = updateSessionNameFromFirstMessage(session.id, text);
-                if (renamedSession) {
-                    this.broadcast(session.id, { type: 'session_updated', session: renamedSession });
-                }
-                this.broadcast(session.id, { type: 'user', content: text, messageId: userMessage.id });
+                this.persistAndBroadcastUserMessage(session.id, text);
                 const manager = this.getManager(session.id);
                 if (manager.isRunning()) {
                     await manager.stop();
@@ -184,7 +180,54 @@ export class WSGateway {
             .sort((left, right) => left.order - right.order)
             .filter((mention, index, array) => array.findIndex(item => item.agentId === mention.agentId) === index);
         if (orderedMentions.length) {
-            await this.handleMentionConversation(session, text, orderedMentions);
+            const mentionValidation = validateMentionConversationRequest({
+                mentions: orderedMentions,
+                tools: getVibeTools(),
+                requireExecutable: true,
+            });
+            if (!mentionValidation.ok) {
+                this.broadcast(session.id, {
+                    type: 'error',
+                    message: mentionValidation.errorMessage,
+                    source: 'system',
+                    sourceLabel: getSourceLabel('system'),
+                });
+                return;
+            }
+            this.clearStreamingMessage(session.id);
+            touchSession(session.id);
+            const manager = this.getManager(session.id);
+            if (manager.isRunning()) {
+                await manager.stop();
+            }
+            const result = await runMentionConversation({
+                sessionId: session.id,
+                projectDir: session.projectDir,
+                text,
+                mentions: orderedMentions,
+                tool: mentionValidation.tool,
+                manager,
+                onUserMessage: (message) => {
+                    this.persistAndBroadcastUserMessage(session.id, message.content, {
+                        senderType: message.senderType,
+                        orchestrationStep: message.orchestrationStep,
+                    });
+                },
+                savePublicMessage: (message) => {
+                    this.savePublicTextMessage(session.id, message);
+                },
+                publish: (message) => {
+                    this.broadcast(session.id, this.withMentionSourceCompatibility(message));
+                },
+            });
+            if (!result.ok) {
+                this.broadcast(session.id, {
+                    type: 'error',
+                    message: result.errorMessage || 'The mention conversation could not be completed.',
+                    source: 'system',
+                    sourceLabel: getSourceLabel('system'),
+                });
+            }
             return;
         }
         // 普通输入先经过工具路由器，决定这一轮由 Claude / Codex / OpenCode 谁来处理。
@@ -214,12 +257,7 @@ export class WSGateway {
         }
         this.clearStreamingMessage(session.id);
         touchSession(session.id);
-        const userMessage = saveMessage(session.id, 'user', text);
-        const renamedSession = updateSessionNameFromFirstMessage(session.id, text);
-        if (renamedSession) {
-            this.broadcast(session.id, { type: 'session_updated', session: renamedSession });
-        }
-        this.broadcast(session.id, { type: 'user', content: text, messageId: userMessage.id });
+        this.persistAndBroadcastUserMessage(session.id, text);
         const manager = this.getManager(session.id);
         if (manager.isRunning()) {
             // 当前设计是一条 session 同时只跑一个 CLI 任务，
@@ -228,161 +266,6 @@ export class WSGateway {
         }
         const tools = getVibeTools();
         await this.executeWithFallback(session.id, session.projectDir, text, routePlan.selectedTools[0], tools);
-    }
-    async handleMentionConversation(session, text, mentions) {
-        if (!session)
-            return;
-        if (mentions.length > 3) {
-            this.broadcast(session.id, {
-                type: 'error',
-                message: 'At most 3 agents can participate in a single mention conversation.',
-                source: 'system',
-                sourceLabel: getSourceLabel('system'),
-            });
-            return;
-        }
-        const toolId = mentions[0].toolId;
-        if (mentions.some(mention => mention.toolId !== toolId)) {
-            this.broadcast(session.id, {
-                type: 'error',
-                message: 'All mentioned agents must belong to the same CLI tool.',
-                source: 'system',
-                sourceLabel: getSourceLabel('system'),
-            });
-            return;
-        }
-        const tools = getVibeTools();
-        const tool = tools.find(item => item.id === toolId);
-        if (!tool?.supportsExecution) {
-            this.broadcast(session.id, {
-                type: 'error',
-                message: tool?.detail || 'The selected CLI tool is not currently available.',
-                source: 'system',
-                sourceLabel: getSourceLabel('system'),
-            });
-            return;
-        }
-        const leadAgent = this.resolveMentionAgent(tool, mentions[0]);
-        if (!leadAgent) {
-            this.broadcast(session.id, {
-                type: 'error',
-                message: `Unable to resolve agent ${mentions[0].name}.`,
-                source: 'system',
-                sourceLabel: getSourceLabel('system'),
-            });
-            return;
-        }
-        const collaboratorAgents = mentions
-            .slice(1)
-            .map(mention => this.resolveMentionAgent(tool, mention))
-            .filter((agent) => !!agent);
-        if (collaboratorAgents.length !== Math.max(mentions.length - 1, 0)) {
-            this.broadcast(session.id, {
-                type: 'error',
-                message: 'One or more mentioned agents could not be resolved for the current CLI.',
-                source: 'system',
-                sourceLabel: getSourceLabel('system'),
-            });
-            return;
-        }
-        this.clearStreamingMessage(session.id);
-        touchSession(session.id);
-        const userMessage = saveMessage(session.id, 'user', text);
-        const renamedSession = updateSessionNameFromFirstMessage(session.id, text);
-        if (renamedSession) {
-            this.broadcast(session.id, { type: 'session_updated', session: renamedSession });
-        }
-        this.broadcast(session.id, { type: 'user', content: text, messageId: userMessage.id });
-        const manager = this.getManager(session.id);
-        if (manager.isRunning()) {
-            await manager.stop();
-        }
-        if (!collaboratorAgents.length) {
-            await manager.start(session.projectDir, text, tool.id, {
-                requestedAgentName: leadAgent.name,
-                requestedAgentLabel: leadAgent.name,
-                preamble: this.buildLeadAgentPreamble(tool, leadAgent),
-            });
-            return;
-        }
-        const collaboratorReplies = [];
-        for (const collaborator of collaboratorAgents) {
-            const leadQuestion = `@${collaborator.name} 用户想知道你现在在做什么，请直接告诉我你当前在处理的事情。`;
-            this.broadcastAgentMessage(session.id, tool.id, leadAgent, leadQuestion, collaborator.name);
-            const collaboratorResult = await manager.start(session.projectDir, text, tool.id, {
-                requestedAgentName: collaborator.name,
-                requestedAgentLabel: collaborator.name,
-                preamble: this.buildCollaboratorPreamble(tool, leadAgent, collaborator, text),
-            });
-            const collaboratorReply = collaboratorResult.assistantText?.trim() || `${collaborator.name} did not provide a usable reply.`;
-            collaboratorReplies.push({ agent: collaborator, reply: collaboratorReply });
-        }
-        await manager.start(session.projectDir, text, tool.id, {
-            requestedAgentName: leadAgent.name,
-            requestedAgentLabel: leadAgent.name,
-            preamble: this.buildLeadSummaryPreamble(tool, leadAgent, text, collaboratorReplies),
-        });
-    }
-    resolveMentionAgent(tool, mention) {
-        return tool.agents.find(agent => agent.id === mention.agentId || agent.name === mention.name) || null;
-    }
-    buildLeadAgentPreamble(tool, leadAgent) {
-        const capabilities = leadAgent.capabilities.slice(0, 4).join('；');
-        return [
-            `你现在在 ${tool.label} CLI 中扮演 Agent "${leadAgent.name}"。`,
-            leadAgent.description ? `你的职责：${leadAgent.description}` : '',
-            capabilities ? `你的能力重点：${capabilities}` : '',
-            '请直接面向最终用户回答。',
-            '如果没有被明确要求，不要主动再 @ 其他 agent。',
-        ].filter(Boolean).join('\n');
-    }
-    buildCollaboratorPreamble(tool, leadAgent, collaborator, userText) {
-        const capabilities = collaborator.capabilities.slice(0, 4).join('；');
-        return [
-            `你现在在 ${tool.label} CLI 中扮演 Agent "${collaborator.name}"。`,
-            collaborator.description ? `你的职责：${collaborator.description}` : '',
-            capabilities ? `你的能力重点：${capabilities}` : '',
-            `主 Agent 是 "${leadAgent.name}"。`,
-            `最终用户的原始问题是：${userText}`,
-            `请直接回复给 ${leadAgent.name}，说明你当前在做什么，或者你当前掌握了什么进展。`,
-            '不要直接面向最终用户，不要再 @ 其他 agent，尽量控制在 3 句以内。',
-        ].filter(Boolean).join('\n');
-    }
-    buildLeadSummaryPreamble(tool, leadAgent, userText, collaboratorReplies) {
-        const summaries = collaboratorReplies
-            .map(item => `- ${item.agent.name}：${item.reply}`)
-            .join('\n');
-        return [
-            `你现在在 ${tool.label} CLI 中扮演 Agent "${leadAgent.name}"。`,
-            leadAgent.description ? `你的职责：${leadAgent.description}` : '',
-            `最终用户的原始问题是：${userText}`,
-            '你刚刚从其他 agent 那里获得了这些公开回复：',
-            summaries || '- 暂无有效回复',
-            '请直接面向最终用户，用自然语言说明其他 agent 当前在做什么。',
-            '不要再发起新的 @agent 提问。',
-        ].filter(Boolean).join('\n');
-    }
-    broadcastAgentMessage(sessionId, tool, agent, content, targetAgentName) {
-        const sourceLabel = targetAgentName
-            ? `${getSourceLabel(tool)} / ${agent.name} -> ${targetAgentName}`
-            : `${getSourceLabel(tool)} / ${agent.name}`;
-        const messageId = crypto.randomUUID();
-        saveMessage(sessionId, 'text', content, {
-            source: tool,
-            sourceLabel,
-            sourceAgent: agent.id,
-            sourceAgentLabel: agent.name,
-            targetAgentName,
-        });
-        this.broadcast(sessionId, {
-            type: 'text',
-            content,
-            messageId,
-            source: tool,
-            sourceLabel,
-            sourceAgent: agent.id,
-            sourceAgentLabel: agent.name,
-        });
     }
     async executeWithFallback(sessionId, projectDir, text, preferredTool, tools = getVibeTools()) {
         const manager = this.getManager(sessionId);
@@ -550,6 +433,57 @@ export class WSGateway {
         if (type && current.type !== type)
             return;
         this.streamingMessages.delete(sessionId);
+    }
+    persistAndBroadcastUserMessage(sessionId, content, metadata = {}) {
+        const userMessage = saveMessage(sessionId, 'user', content, metadata);
+        const renamedSession = updateSessionNameFromFirstMessage(sessionId, content);
+        if (renamedSession) {
+            this.broadcast(sessionId, { type: 'session_updated', session: renamedSession });
+        }
+        this.broadcast(sessionId, {
+            type: 'user',
+            content,
+            messageId: userMessage.id,
+            ...metadata,
+        });
+        return userMessage;
+    }
+    savePublicTextMessage(sessionId, message) {
+        const { type: _type, content, messageId, ...metadata } = this.withMentionSourceCompatibility(message);
+        saveMessage(sessionId, 'text', content, metadata, messageId);
+    }
+    withMentionSourceCompatibility(message) {
+        if (message.source || message.senderType !== 'agent')
+            return message;
+        const source = this.getMentionMessageSource(message.senderAgentId);
+        if (!source)
+            return message;
+        const sourceAgent = message.senderAgentId || undefined;
+        const sourceAgentLabel = message.senderAgentName || undefined;
+        const sourceLabel = sourceAgentLabel
+            ? this.buildMentionSourceLabel(source, sourceAgentLabel, message.targetAgentName, message.targetAgentId)
+            : getSourceLabel(source);
+        return {
+            ...message,
+            source,
+            sourceLabel,
+            sourceAgent,
+            sourceAgentLabel,
+        };
+    }
+    buildMentionSourceLabel(source, senderAgentName, targetAgentName, targetAgentId) {
+        if (targetAgentName && targetAgentId && targetAgentId !== 'user') {
+            return `${getSourceLabel(source)} / ${senderAgentName} -> ${targetAgentName}`;
+        }
+        return `${getSourceLabel(source)} / ${senderAgentName}`;
+    }
+    getMentionMessageSource(senderAgentId) {
+        if (!senderAgentId)
+            return undefined;
+        const [source] = senderAgentId.split(':', 1);
+        return source === 'claude' || source === 'codex' || source === 'opencode'
+            ? source
+            : undefined;
     }
     persistManagerSessionState(sessionId, manager, successfulTool) {
         if (!manager)

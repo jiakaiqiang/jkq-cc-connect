@@ -1,7 +1,17 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { AgentMention, Message, MessageSource, SessionInfo, ServerMsg, CCStatus, ToolExecutionMode } from '@/types'
+import type {
+  AgentMention,
+  Message,
+  MessageSource,
+  OrchestrationMetadata,
+  SessionInfo,
+  ServerMsg,
+  CCStatus,
+  ToolExecutionMode,
+} from '@/types'
 import { useWSStore } from './ws'
+import { resolveMessageSourceLabel } from '@/components/chat/sourceLabel'
 import { generateId } from '@/utils/uuid'
 
 export interface UIMessage {
@@ -39,7 +49,20 @@ function sourceLabelFrom(source: MessageSource | undefined) {
 
 function withSourceMetadata(metadata: Record<string, unknown>, source: MessageSource | undefined) {
   if (!source) return metadata
-  return { ...metadata, source, sourceLabel: sourceLabelFrom(source) }
+  return { ...metadata, source }
+}
+
+function resolveIncomingSourceLabel(
+  source: MessageSource | undefined,
+  sourceLabel: string | undefined,
+  orchestration: Partial<OrchestrationMetadata> = {},
+) {
+  return resolveMessageSourceLabel({
+    sourceLabel,
+    senderAgentName: orchestration.senderAgentName,
+    targetAgentName: orchestration.targetAgentName,
+    orchestrationStep: orchestration.orchestrationStep,
+  }) ?? sourceLabelFrom(source)
 }
 
 function withIncomingSourceMetadata(
@@ -48,12 +71,28 @@ function withIncomingSourceMetadata(
   sourceLabel?: string,
   sourceAgent?: string,
   sourceAgentLabel?: string,
+  orchestration: Partial<OrchestrationMetadata> = {},
 ) {
   const result = source ? withSourceMetadata(metadata, source) : { ...metadata }
-  if (sourceLabel) result.sourceLabel = sourceLabel
   if (sourceAgent) result.sourceAgent = sourceAgent
   if (sourceAgentLabel) result.sourceAgentLabel = sourceAgentLabel
-  return result
+  const merged: Record<string, unknown> = { ...result, ...orchestration }
+  const resolvedSourceLabel = resolveIncomingSourceLabel(source, sourceLabel, orchestration)
+  if (resolvedSourceLabel) {
+    merged.sourceLabel = resolvedSourceLabel
+  }
+  return merged
+}
+
+function incomingOrchestrationMetadata(msg: Partial<OrchestrationMetadata>) {
+  return {
+    senderType: msg.senderType,
+    senderAgentId: msg.senderAgentId,
+    senderAgentName: msg.senderAgentName,
+    targetAgentId: msg.targetAgentId,
+    targetAgentName: msg.targetAgentName,
+    orchestrationStep: msg.orchestrationStep,
+  }
 }
 
 function isAssistantRenderable(type: string) {
@@ -634,14 +673,15 @@ export const useChatStore = defineStore('chat', () => {
       case 'user':
         lastMutation.value = 'append'
         {
+          const metadata = incomingOrchestrationMetadata(msg)
           const pendingMessage = findPendingUserMessage(messages.value, msg.content)
           if (pendingMessage) {
             pendingMessage.id = msg.messageId
-            pendingMessage.metadata = {}
+            pendingMessage.metadata = { ...metadata }
             pendingMessage.timestamp = new Date().toISOString()
             break
           }
-          pushNonStreaming(messages.value, msg.messageId, 'user', msg.content)
+          pushNonStreaming(messages.value, msg.messageId, 'user', msg.content, metadata)
         }
         break
       case 'text':
@@ -654,7 +694,14 @@ export const useChatStore = defineStore('chat', () => {
           'text',
           msg.content,
           msg.messageId,
-          withIncomingSourceMetadata({}, msg.source, msg.sourceLabel, msg.sourceAgent, msg.sourceAgentLabel),
+          withIncomingSourceMetadata(
+            {},
+            msg.source,
+            msg.sourceLabel,
+            msg.sourceAgent,
+            msg.sourceAgentLabel,
+            incomingOrchestrationMetadata(msg),
+          ),
         )
         break
       case 'thinking':
@@ -667,7 +714,14 @@ export const useChatStore = defineStore('chat', () => {
           'thinking',
           msg.content,
           msg.messageId,
-          withIncomingSourceMetadata({}, msg.source, msg.sourceLabel, msg.sourceAgent, msg.sourceAgentLabel),
+          withIncomingSourceMetadata(
+            {},
+            msg.source,
+            msg.sourceLabel,
+            msg.sourceAgent,
+            msg.sourceAgentLabel,
+            incomingOrchestrationMetadata(msg),
+          ),
         )
         break
       case 'thinking_done':
@@ -684,7 +738,14 @@ export const useChatStore = defineStore('chat', () => {
           msg.messageId,
           'code',
           msg.content,
-          withIncomingSourceMetadata({ language: msg.lang }, msg.source, msg.sourceLabel, msg.sourceAgent, msg.sourceAgentLabel),
+          withIncomingSourceMetadata(
+            { language: msg.lang },
+            msg.source,
+            msg.sourceLabel,
+            msg.sourceAgent,
+            msg.sourceAgentLabel,
+            incomingOrchestrationMetadata(msg),
+          ),
         )
         break
       case 'diff':
@@ -697,7 +758,14 @@ export const useChatStore = defineStore('chat', () => {
           msg.messageId,
           'diff',
           msg.content,
-          withIncomingSourceMetadata({}, msg.source, msg.sourceLabel, msg.sourceAgent, msg.sourceAgentLabel),
+          withIncomingSourceMetadata(
+            {},
+            msg.source,
+            msg.sourceLabel,
+            msg.sourceAgent,
+            msg.sourceAgentLabel,
+            incomingOrchestrationMetadata(msg),
+          ),
         )
         break
       case 'tool_use':
@@ -705,10 +773,13 @@ export const useChatStore = defineStore('chat', () => {
         hideProcessingHint()
         scheduleProcessingHint()
         clearThinkingIndicator()
+        {
+          const orchestration = incomingOrchestrationMetadata(msg)
+          const resolvedSourceLabel = resolveIncomingSourceLabel(msg.source, msg.sourceLabel, orchestration)
         activeToolUse.value = {
           toolName: msg.toolName,
           toolInput: msg.toolInput || {},
-          sourceLabel: msg.sourceLabel || (msg.source ? sourceLabelFrom(msg.source) : undefined),
+          sourceLabel: resolvedSourceLabel,
         }
         pushNonStreaming(
           messages.value,
@@ -724,8 +795,10 @@ export const useChatStore = defineStore('chat', () => {
             msg.sourceLabel,
             msg.sourceAgent,
             msg.sourceAgentLabel,
+            orchestration,
           ),
         )
+        }
         break
       case 'tool_result':
         lastMutation.value = 'append'
@@ -737,7 +810,14 @@ export const useChatStore = defineStore('chat', () => {
           msg.messageId,
           'tool_result',
           msg.content,
-          withIncomingSourceMetadata({ parentId: msg.parentId }, msg.source, msg.sourceLabel, msg.sourceAgent, msg.sourceAgentLabel),
+          withIncomingSourceMetadata(
+            { parentId: msg.parentId },
+            msg.source,
+            msg.sourceLabel,
+            msg.sourceAgent,
+            msg.sourceAgentLabel,
+            incomingOrchestrationMetadata(msg),
+          ),
         )
         break
       case 'confirm_request':
@@ -756,7 +836,14 @@ export const useChatStore = defineStore('chat', () => {
           (msg as any).messageId || generateId(),
           'error',
           msg.message,
-          withIncomingSourceMetadata({}, msg.source, msg.sourceLabel, msg.sourceAgent, msg.sourceAgentLabel),
+          withIncomingSourceMetadata(
+            {},
+            msg.source,
+            msg.sourceLabel,
+            msg.sourceAgent,
+            msg.sourceAgentLabel,
+            incomingOrchestrationMetadata(msg),
+          ),
         )
         break
     }

@@ -5,6 +5,16 @@ export type VibeToolId = 'claude' | 'codex' | 'opencode'
 export type ToolExecutionMode = 'auto' | 'parallel' | VibeToolId
 export type VibeToolState = 'ready' | 'limited' | 'error' | 'missing'
 export type MessageSource = VibeToolId | 'system'
+export type OrchestrationStep = 'user_request' | 'agent_to_agent' | 'agent_reply' | 'agent_to_user'
+
+export interface OrchestrationMetadata {
+  senderType: 'user' | 'agent' | 'system'
+  senderAgentId?: string
+  senderAgentName?: string
+  targetAgentId?: string
+  targetAgentName?: string
+  orchestrationStep?: OrchestrationStep
+}
 
 export type MessageType =
   | 'user'
@@ -117,21 +127,28 @@ export type ClientMsg =
   | { type: 'cancel'; sessionId?: string }
   | { type: 'ping' }
 
+type ServerMsgWithSource = {
+  source?: MessageSource
+  sourceLabel?: string
+  sourceAgent?: string
+  sourceAgentLabel?: string
+} & Partial<OrchestrationMetadata>
+
 export type ServerMsg =
   | { type: 'auth_ok'; session: SessionInfo }
   | { type: 'auth_error'; message: string }
   | { type: 'mode_changed'; mode: ToolExecutionMode; reason?: string }
   | { type: 'session_updated'; session: SessionInfo }
-  | { type: 'user'; content: string; messageId: string }
-  | { type: 'text'; content: string; messageId: string; source?: MessageSource; sourceLabel?: string; sourceAgent?: string; sourceAgentLabel?: string }
-  | { type: 'thinking'; content: string; messageId: string; source?: MessageSource; sourceLabel?: string; sourceAgent?: string; sourceAgentLabel?: string }
-  | { type: 'thinking_done'; messageId: string; source?: MessageSource; sourceLabel?: string; sourceAgent?: string; sourceAgentLabel?: string }
-  | { type: 'code'; lang: string; content: string; messageId: string; source?: MessageSource; sourceLabel?: string; sourceAgent?: string; sourceAgentLabel?: string }
-  | { type: 'diff'; content: string; messageId: string; source?: MessageSource; sourceLabel?: string; sourceAgent?: string; sourceAgentLabel?: string }
-  | { type: 'tool_use'; toolName: string; toolInput: Record<string, unknown>; messageId: string; source?: MessageSource; sourceLabel?: string; sourceAgent?: string; sourceAgentLabel?: string }
-  | { type: 'tool_result'; content: string; messageId: string; parentId: string; source?: MessageSource; sourceLabel?: string; sourceAgent?: string; sourceAgentLabel?: string }
+  | ({ type: 'user'; content: string; messageId: string } & Partial<OrchestrationMetadata>)
+  | ({ type: 'text'; content: string; messageId: string } & ServerMsgWithSource)
+  | ({ type: 'thinking'; content: string; messageId: string } & ServerMsgWithSource)
+  | ({ type: 'thinking_done'; messageId: string } & ServerMsgWithSource)
+  | ({ type: 'code'; lang: string; content: string; messageId: string } & ServerMsgWithSource)
+  | ({ type: 'diff'; content: string; messageId: string } & ServerMsgWithSource)
+  | ({ type: 'tool_use'; toolName: string; toolInput: Record<string, unknown>; messageId: string } & ServerMsgWithSource)
+  | ({ type: 'tool_result'; content: string; messageId: string; parentId: string } & ServerMsgWithSource)
   | { type: 'confirm_request'; requestId: string; message: string; toolName: string }
-  | { type: 'error'; message: string; source?: MessageSource; sourceLabel?: string; sourceAgent?: string; sourceAgentLabel?: string }
+  | ({ type: 'error'; message: string } & ServerMsgWithSource)
   | { type: 'status'; state: CCStatus }
   | { type: 'session_state'; messages: Message[]; session: SessionInfo; hasMore: boolean; oldestSeq: number | null }
   | { type: 'pong' }

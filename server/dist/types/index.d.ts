@@ -3,6 +3,7 @@ export type VibeToolId = 'claude' | 'codex' | 'opencode';
 export type ToolExecutionMode = 'auto' | 'parallel' | VibeToolId;
 export type VibeToolState = 'ready' | 'limited' | 'error' | 'missing';
 export type MessageSource = VibeToolId | 'system';
+export type OrchestrationStep = 'user_request' | 'agent_to_agent' | 'agent_reply' | 'agent_to_user';
 export type MessageType = 'user' | 'text' | 'thinking' | 'thinking_done' | 'code' | 'diff' | 'tool_use' | 'tool_result' | 'confirm_request' | 'error' | 'status';
 export interface Message {
     id: string;
@@ -97,6 +98,14 @@ export interface AgentMention {
     name: string;
     order: number;
 }
+export interface OrchestrationMetadata {
+    senderType: 'user' | 'agent' | 'system';
+    senderAgentId: string;
+    senderAgentName: string;
+    targetAgentId: string;
+    targetAgentName: string;
+    orchestrationStep: OrchestrationStep;
+}
 export type ClientMsg = {
     type: 'auth';
     token: string;
@@ -141,7 +150,9 @@ export type ServerMsg = {
     type: 'user';
     content: string;
     messageId: string;
-} | {
+    senderType?: 'user';
+    orchestrationStep?: 'user_request';
+} | ({
     type: 'text';
     content: string;
     messageId: string;
@@ -149,7 +160,7 @@ export type ServerMsg = {
     sourceLabel?: string;
     sourceAgent?: string;
     sourceAgentLabel?: string;
-} | {
+} & Partial<OrchestrationMetadata>) | ({
     type: 'thinking';
     content: string;
     messageId: string;
@@ -157,14 +168,14 @@ export type ServerMsg = {
     sourceLabel?: string;
     sourceAgent?: string;
     sourceAgentLabel?: string;
-} | {
+} & Partial<OrchestrationMetadata>) | ({
     type: 'thinking_done';
     messageId: string;
     source?: MessageSource;
     sourceLabel?: string;
     sourceAgent?: string;
     sourceAgentLabel?: string;
-} | {
+} & Partial<OrchestrationMetadata>) | ({
     type: 'code';
     lang: string;
     content: string;
@@ -173,7 +184,7 @@ export type ServerMsg = {
     sourceLabel?: string;
     sourceAgent?: string;
     sourceAgentLabel?: string;
-} | {
+} & Partial<OrchestrationMetadata>) | ({
     type: 'diff';
     content: string;
     messageId: string;
@@ -181,7 +192,7 @@ export type ServerMsg = {
     sourceLabel?: string;
     sourceAgent?: string;
     sourceAgentLabel?: string;
-} | {
+} & Partial<OrchestrationMetadata>) | ({
     type: 'tool_use';
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -190,7 +201,7 @@ export type ServerMsg = {
     sourceLabel?: string;
     sourceAgent?: string;
     sourceAgentLabel?: string;
-} | {
+} & Partial<OrchestrationMetadata>) | ({
     type: 'tool_result';
     content: string;
     messageId: string;
@@ -199,19 +210,19 @@ export type ServerMsg = {
     sourceLabel?: string;
     sourceAgent?: string;
     sourceAgentLabel?: string;
-} | {
+} & Partial<OrchestrationMetadata>) | {
     type: 'confirm_request';
     requestId: string;
     message: string;
     toolName: string;
-} | {
+} | ({
     type: 'error';
     message: string;
     source?: MessageSource;
     sourceLabel?: string;
     sourceAgent?: string;
     sourceAgentLabel?: string;
-} | {
+} & Partial<OrchestrationMetadata>) | {
     type: 'status';
     state: CCStatus;
 } | {

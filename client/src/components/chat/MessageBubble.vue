@@ -1,23 +1,34 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { OrchestrationStep } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
+import { resolveMessageSourceLabel } from './sourceLabel'
 
 const props = defineProps<{
   content: string
   role: 'user' | 'assistant'
   sourceLabel?: string
+  senderAgentName?: string
+  targetAgentName?: string
+  orchestrationStep?: OrchestrationStep
 }>()
 
 const html = computed(() => renderMarkdown(props.content))
+const resolvedSourceLabel = computed(() => resolveMessageSourceLabel({
+  sourceLabel: props.sourceLabel,
+  senderAgentName: props.senderAgentName,
+  targetAgentName: props.targetAgentName,
+  orchestrationStep: props.orchestrationStep,
+}))
 </script>
 
 <template>
   <div :class="['w-full min-w-0 max-w-[85%]', role === 'user' ? 'ml-auto' : 'mr-auto']">
     <div
-      v-if="role === 'assistant' && sourceLabel"
+      v-if="role === 'assistant' && resolvedSourceLabel"
       class="mb-1.5 px-1 text-[11px] font-medium text-gray-500"
     >
-      {{ sourceLabel }}
+      {{ resolvedSourceLabel }}
     </div>
     <div :class="[
       'min-w-0 overflow-hidden rounded-2xl px-4 py-2.5 text-sm leading-relaxed',

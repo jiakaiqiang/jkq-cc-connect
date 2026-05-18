@@ -146,13 +146,13 @@ function badgeClasses(state: VibeToolInfo['state']) {
 
     <main class="min-h-0 flex-1 overflow-hidden px-4 py-3">
       <div class="mx-auto h-full max-w-7xl">
-        <section class="h-full min-h-0 overflow-hidden rounded-lg border border-gray-800 bg-gray-900/70">
-          <div class="border-b border-gray-800 px-4 py-2.5">
+        <section class="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-gray-800 bg-gray-900/70">
+          <div class="shrink-0 border-b border-gray-800 px-4 py-2.5">
             <p class="text-sm font-medium text-white">Agent 列表</p>
             <p class="mt-1 text-xs text-gray-500">{{ allFlatAgents.length }} 个 Agent</p>
           </div>
 
-          <div class="h-[calc(100%-61px)] overflow-y-auto px-2.5 py-2.5">
+          <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] px-2.5 py-2.5">
             <div
               v-if="!visibleGroups.length"
               class="rounded-lg border border-dashed border-gray-800 px-4 py-8 text-center text-sm text-gray-500"

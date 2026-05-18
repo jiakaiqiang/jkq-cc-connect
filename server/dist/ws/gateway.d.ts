@@ -9,12 +9,6 @@ export declare class WSGateway {
     private handleMessage;
     private getManager;
     private handleInput;
-    private handleMentionConversation;
-    private resolveMentionAgent;
-    private buildLeadAgentPreamble;
-    private buildCollaboratorPreamble;
-    private buildLeadSummaryPreamble;
-    private broadcastAgentMessage;
     private executeWithFallback;
     private handleCCMessage;
     private persistStreamingMessage;
@@ -22,6 +16,11 @@ export declare class WSGateway {
     private getSourceMetadata;
     private attachSource;
     private clearStreamingMessage;
+    private persistAndBroadcastUserMessage;
+    private savePublicTextMessage;
+    private withMentionSourceCompatibility;
+    private buildMentionSourceLabel;
+    private getMentionMessageSource;
     private persistManagerSessionState;
     private sendSessionState;
     private setSessionMode;

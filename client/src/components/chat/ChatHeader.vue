@@ -428,7 +428,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-else-if="activePanel === 'memory'" class="flex max-h-[60vh] flex-col gap-3">
+        <div v-else-if="activePanel === 'memory'" class="flex max-h-[60vh] min-h-0 flex-col gap-3">
           <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-3">
             <p class="text-sm leading-6 text-gray-300">
               当前 session 的 memory 默认分块收起，点开后可以看完整内容。
@@ -444,75 +444,75 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="min-h-0 overflow-y-auto overscroll-contain pr-1">
-          <div
-            v-if="memory.loading && !memory.current"
-            class="rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-10 text-center text-sm text-gray-500"
-          >
-            正在加载当前 session 的 memory...
-          </div>
-
-          <div
-            v-else-if="!memory.current"
-            class="rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-10 text-center text-sm text-gray-500"
-          >
-            当前 session 暂无可展示的 memory。
-          </div>
-
-          <template v-else>
-            <button
-              v-for="section in memorySections"
-              :key="section.id"
-              type="button"
-              class="w-full rounded-xl border border-gray-800 bg-gray-900/70 text-left transition-colors hover:border-gray-700 hover:bg-gray-900"
-              @click="toggleMemorySection(section.id)"
+          <div class="min-h-0 overflow-y-auto overscroll-contain pr-1 [-webkit-overflow-scrolling:touch]">
+            <div
+              v-if="memory.loading && !memory.current"
+              class="rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-10 text-center text-sm text-gray-500"
             >
-              <div class="flex items-center justify-between gap-4 px-4 py-3">
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium text-white">{{ section.title }}</p>
+              正在加载当前 session 的 memory...
+            </div>
+
+            <div
+              v-else-if="!memory.current"
+              class="rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-10 text-center text-sm text-gray-500"
+            >
+              当前 session 暂无可展示的 memory。
+            </div>
+
+            <template v-else>
+              <button
+                v-for="section in memorySections"
+                :key="section.id"
+                type="button"
+                class="w-full rounded-xl border border-gray-800 bg-gray-900/70 text-left transition-colors hover:border-gray-700 hover:bg-gray-900"
+                @click="toggleMemorySection(section.id)"
+              >
+                <div class="flex items-center justify-between gap-4 px-4 py-3">
+                  <div class="min-w-0 flex-1">
+                    <p class="text-sm font-medium text-white">{{ section.title }}</p>
+                  </div>
+                  <svg
+                    class="mt-0.5 h-4 w-4 shrink-0 text-gray-500 transition-transform"
+                    :class="isMemoryExpanded(section.id) ? 'rotate-180' : ''"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </div>
-                <svg
-                  class="mt-0.5 h-4 w-4 shrink-0 text-gray-500 transition-transform"
-                  :class="isMemoryExpanded(section.id) ? 'rotate-180' : ''"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
 
-              <div v-if="isMemoryExpanded(section.id)" class="border-t border-gray-800 px-4 py-3">
-                <p
-                  v-if="section.kind === 'text'"
-                  class="rounded-lg bg-gray-950/90 px-3 py-2 text-sm leading-6 text-gray-200 break-all whitespace-pre-wrap"
-                >
-                  {{ section.text }}
-                </p>
-
-                <ul v-else class="space-y-2">
-                  <li
-                    v-for="(item, index) in section.items"
-                    :key="`${section.id}-${index}-${item}`"
+                <div v-if="isMemoryExpanded(section.id)" class="border-t border-gray-800 px-4 py-3">
+                  <p
+                    v-if="section.kind === 'text'"
                     class="rounded-lg bg-gray-950/90 px-3 py-2 text-sm leading-6 text-gray-200 break-all whitespace-pre-wrap"
-                    :class="section.id === 'files' ? 'font-mono' : ''"
                   >
-                    {{ item }}
-                  </li>
-                  <li
-                    v-if="!section.items?.length"
-                    class="rounded-lg bg-gray-950/90 px-3 py-2 text-sm text-gray-500"
-                  >
-                    暂无内容
-                  </li>
-                </ul>
-              </div>
-            </button>
-          </template>
+                    {{ section.text }}
+                  </p>
+
+                  <ul v-else class="space-y-2">
+                    <li
+                      v-for="(item, index) in section.items"
+                      :key="`${section.id}-${index}-${item}`"
+                      class="rounded-lg bg-gray-950/90 px-3 py-2 text-sm leading-6 text-gray-200 break-all whitespace-pre-wrap"
+                      :class="section.id === 'files' ? 'font-mono' : ''"
+                    >
+                      {{ item }}
+                    </li>
+                    <li
+                      v-if="!section.items?.length"
+                      class="rounded-lg bg-gray-950/90 px-3 py-2 text-sm text-gray-500"
+                    >
+                      暂无内容
+                    </li>
+                  </ul>
+                </div>
+              </button>
+            </template>
           </div>
         </div>
 
-        <div v-else class="space-y-3">
+        <div v-else class="flex max-h-[60vh] min-h-0 flex-col gap-3">
           <div class="flex items-center justify-between gap-3 rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-3">
             <p class="text-sm leading-6 text-gray-300">
               {{ agentPanelHint }}
@@ -528,115 +528,118 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div
-            v-if="vibe.loading && !visibleAgentGroups.length"
-            class="rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-10 text-center text-sm text-gray-500"
-          >
-            正在加载 Agent 信息...
-          </div>
-
-          <div
-            v-else-if="!visibleAgentGroups.length"
-            class="rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-10 text-center text-sm text-gray-500"
-          >
-            当前没有可展示的 Agent。
-          </div>
-
-          <template v-else>
-            <section
-              v-for="tool in visibleAgentGroups"
-              :key="tool.id"
-              class="overflow-hidden rounded-xl border border-gray-800 bg-gray-900/70"
+          <div class="min-h-0 overflow-y-auto overscroll-contain pr-1 [-webkit-overflow-scrolling:touch]">
+            <div
+              v-if="vibe.loading && !visibleAgentGroups.length"
+              class="rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-10 text-center text-sm text-gray-500"
             >
-              <button
-                class="flex w-full cursor-pointer items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-gray-900"
-                @click="toggleAgentGroup(tool.id)"
-              >
-                <div class="min-w-0">
-                  <p class="text-sm font-medium text-white">{{ tool.label }}</p>
-                  <p class="mt-1 text-xs text-gray-500">
-                    {{ tool.agents.length }} 个 Agent，{{ tool.statusText }}
-                  </p>
-                </div>
-                <svg
-                  class="h-4 w-4 shrink-0 text-gray-500 transition-transform"
-                  :class="isAgentGroupExpanded(tool.id) ? 'rotate-180' : ''"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
+              正在加载 Agent 信息...
+            </div>
 
-              <div v-if="isAgentGroupExpanded(tool.id)" class="border-t border-gray-800 px-3 py-3">
-                <div class="space-y-2">
-                  <button
-                    v-for="agent in tool.agents"
-                    :key="agent.id"
-                    type="button"
-                    class="w-full rounded-xl border border-gray-800 bg-gray-950/80 text-left transition-colors hover:border-gray-700 hover:bg-gray-950"
-                    @click="toggleAgent(agent)"
+            <div
+              v-else-if="!visibleAgentGroups.length"
+              class="rounded-xl border border-gray-800 bg-gray-900/70 px-4 py-10 text-center text-sm text-gray-500"
+            >
+              当前没有可展示的 Agent。
+            </div>
+
+            <template v-else>
+              <section
+                v-for="tool in visibleAgentGroups"
+                :key="tool.id"
+                class="overflow-hidden rounded-xl border border-gray-800 bg-gray-900/70"
+              >
+                <button
+                  class="flex w-full cursor-pointer items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-gray-900"
+                  @click="toggleAgentGroup(tool.id)"
+                >
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-white">{{ tool.label }}</p>
+                    <p class="mt-1 text-xs text-gray-500">
+                      {{ tool.agents.length }} 个 Agent，{{ tool.statusText }}
+                    </p>
+                  </div>
+                  <svg
+                    class="h-4 w-4 shrink-0 text-gray-500 transition-transform"
+                    :class="isAgentGroupExpanded(tool.id) ? 'rotate-180' : ''"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
                   >
-                    <div class="flex items-start justify-between gap-4 px-4 py-3">
-                      <div class="min-w-0 flex-1">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <p class="text-sm font-medium text-white">{{ agent.name }}</p>
-                          <span
-                            class="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]"
-                            :class="agent.state === 'ready'
-                              ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
-                              : agent.state === 'limited'
-                                ? 'border-amber-400/30 bg-amber-400/10 text-amber-300'
-                                : agent.state === 'error'
-                                  ? 'border-rose-400/30 bg-rose-400/10 text-rose-300'
-                                  : 'border-gray-700 bg-gray-800 text-gray-400'"
-                          >
-                            {{ agent.statusText }}
-                          </span>
-                        </div>
-                        <p class="mt-1 text-xs leading-5 text-gray-500">
-                          {{ agent.capabilities[0] || agent.description || '暂无能力说明' }}
-                        </p>
-                      </div>
-                      <svg
-                        class="mt-0.5 h-4 w-4 shrink-0 text-gray-500 transition-transform"
-                        :class="isAgentExpanded(agent.id) ? 'rotate-180' : ''"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
+                  >
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                       </svg>
-                    </div>
+                    </button>
 
-                    <div v-if="isAgentExpanded(agent.id)" class="border-t border-gray-800 px-4 py-3">
-                      <p class="text-sm leading-6 text-gray-300">{{ agent.description }}</p>
-                      <div class="mt-3 space-y-2">
-                        <p class="text-xs font-medium uppercase tracking-[0.2em] text-gray-500">具体能力</p>
-                        <ul class="space-y-2">
-                          <li
-                            v-for="(capability, index) in agent.capabilities"
-                            :key="`${agent.id}-capability-${index}`"
-                            class="rounded-lg bg-gray-900/80 px-3 py-2 text-sm leading-6 text-gray-200"
-                          >
-                            {{ capability }}
-                          </li>
-                          <li
-                            v-if="!agent.capabilities.length"
-                            class="rounded-lg bg-gray-900/80 px-3 py-2 text-sm text-gray-500"
-                          >
-                            暂无更详细的能力列表。
-                          </li>
-                        </ul>
+                    <div v-if="isAgentGroupExpanded(tool.id)" class="border-t border-gray-800 px-3 py-3">
+                      <div class="space-y-2">
+                        <button
+                          v-for="agent in tool.agents"
+                          :key="agent.id"
+                          type="button"
+                          class="w-full rounded-xl border border-gray-800 bg-gray-950/80 text-left transition-colors hover:border-gray-700 hover:bg-gray-950"
+                          @click="toggleAgent(agent)"
+                        >
+                          <div class="flex items-start justify-between gap-4 px-4 py-3">
+                            <div class="min-w-0 flex-1">
+                              <div class="flex flex-wrap items-center gap-2">
+                                <p class="text-sm font-medium text-white">{{ agent.name }}</p>
+                                <span
+                                  class="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px]"
+                                  :class="agent.state === 'ready'
+                                    ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+                                    : agent.state === 'limited'
+                                      ? 'border-amber-400/30 bg-amber-400/10 text-amber-300'
+                                      : agent.state === 'error'
+                                        ? 'border-rose-400/30 bg-rose-400/10 text-rose-300'
+                                        : 'border-gray-700 bg-gray-800 text-gray-400'"
+                                >
+                                  {{ agent.statusText }}
+                                </span>
+                              </div>
+                              <p class="mt-1 text-xs leading-5 text-gray-500">
+                                {{ agent.capabilities[0] || agent.description || '暂无能力说明' }}
+                              </p>
+                            </div>
+                            <svg
+                              class="mt-0.5 h-4 w-4 shrink-0 text-gray-500 transition-transform"
+                              :class="isAgentExpanded(agent.id) ? 'rotate-180' : ''"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
+
+                          <div v-if="isAgentExpanded(agent.id)" class="border-t border-gray-800 px-4 py-3">
+                            <p class="text-sm leading-6 text-gray-300">{{ agent.description }}</p>
+                            <div class="mt-3 space-y-2">
+                              <p class="text-xs font-medium uppercase tracking-[0.2em] text-gray-500">具体能力</p>
+                              <ul class="space-y-2">
+                                <li
+                                  v-for="(capability, index) in agent.capabilities"
+                                  :key="`${agent.id}-capability-${index}`"
+                                  class="rounded-lg bg-gray-900/80 px-3 py-2 text-sm leading-6 text-gray-200"
+                                >
+                                  {{ capability }}
+                                </li>
+                                <li
+                                  v-if="!agent.capabilities.length"
+                                  class="rounded-lg bg-gray-900/80 px-3 py-2 text-sm text-gray-500"
+                                >
+                                  暂无更详细的能力列表。
+                                </li>
+                              </ul>
+                            </div>
+                          </div>
+                        </button>
                       </div>
                     </div>
-                  </button>
-                </div>
+                  </section>
+                </template>
               </div>
-            </section>
-          </template>
-        </div>
+            </div>
       </div>
     </div>
   </header>
