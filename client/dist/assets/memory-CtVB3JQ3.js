@@ -1,1 +1,0 @@
-import{J as t,r as l,n as s}from"./index-CF9rku9B.js";const f=t("memory",()=>{const a=l(null),e=l(!1);async function n(o){e.value=!0;try{a.value=await s.getSessionMemory(o)}finally{e.value=!1}}function r(){a.value=null,e.value=!1}return{current:a,loading:e,load:n,clear:r}});export{f as u};

@@ -1,9 +1,0 @@
-{
-  "port": 3000,
-  "projectDir": "D:\\demo\\jkq-cc-connect\\server",
-  "allowedRoots": [
-    "D:\\demo\\jkq-cc-connect\\server"
-  ],
-  "passwordHash": null,
-  "jwtSecret": "c0f999b3168123c6ad3c57b95e4ab3bdc8d925bc1d2278cafc0b8fadf58c9c09"
-}
